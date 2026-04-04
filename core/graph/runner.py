@@ -40,7 +40,7 @@ def run_session(company_id: str, task: str, context: str = "") -> None:
     print(f"\n  Company: {config['company_name']}  |  Task: {task[:60]}\n")
 
     # ── Build graph ────────────────────────────────────────────────────────
-    graph  = build_session_graph(company_id)
+    graph, checkpointer_ctx = build_session_graph(company_id)
     thread = {"configurable": {"thread_id": f"{company_id}_{hash(task)}"}}
 
     # ── Initial state ──────────────────────────────────────────────────────

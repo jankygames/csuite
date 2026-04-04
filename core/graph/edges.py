@@ -8,7 +8,8 @@ the current state and return a string key. That key maps to the next
 node name in the graph's routing table.
 
 Currently defined edges:
-    conflict_router — routes after CEO synthesis based on consensus state
+    conflict_router        — routes after CEO synthesis based on consensus state
+    human_decision_router  — routes after human response (approve/override/more info)
 """
 
 MAX_DEBATE_ROUNDS = 2
@@ -37,3 +38,23 @@ def conflict_router(state: dict) -> str:
         return "deadlocked"
 
     return "escalate"
+
+
+def human_decision_router(state: dict) -> str:
+    """
+    Called after the human_interrupt node.
+
+    If the human provides new information ("more info ..."), loops back
+    to deliberation so the C-suite can reconsider with the new context.
+    Otherwise, finalizes the session and writes to memory.
+
+    The graph maps these string keys to node names:
+        "finalize"    → memory_write → END
+        "reconsider"  → reconsider_with_info → round1_deliberation
+    """
+    decision = (state.get("human_decision") or "").strip().lower()
+
+    if decision.startswith("more info"):
+        return "reconsider"
+
+    return "finalize"

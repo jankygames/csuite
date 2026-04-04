@@ -23,6 +23,7 @@ import chainlit as cl
 
 from core.config import COMPANY_ROOT
 from core.graph.session_graph import build_session_graph
+from core.graph.nodes import set_progress_callback
 
 
 # ── Startup: company selection ───────────────────────────────────────────────
@@ -42,7 +43,7 @@ async def start():
         return
 
     actions = [
-        cl.Action(name="select_company", value=c["id"], label=c["name"])
+        cl.Action(name="select_company", payload={"id": c["id"]}, label=c["name"])
         for c in companies
     ]
 
@@ -52,7 +53,7 @@ async def start():
     ).send()
 
     if res:
-        company_id = res.get("value") if isinstance(res, dict) else res.value
+        company_id = res.get("payload", {}).get("id") if isinstance(res, dict) else res.payload["id"]
         await _load_company(company_id)
 
 
@@ -111,7 +112,7 @@ async def _run_deliberation(task: str):
 
     cl.user_session.set("phase", "running")
 
-    graph = build_session_graph(company_id)
+    graph, checkpointer_ctx = build_session_graph(company_id)
     thread_config = {"configurable": {"thread_id": f"{company_id}_{hash(task)}"}}
 
     initial_state = {
@@ -136,18 +137,52 @@ async def _run_deliberation(task: str):
         "conflicts_identified": [],
     }
 
-    # Store graph + thread for resuming after human input
+    # Store graph + thread + checkpointer for resuming after human input
     cl.user_session.set("graph", graph)
     cl.user_session.set("thread_config", thread_config)
+    cl.user_session.set("checkpointer_ctx", checkpointer_ctx)
 
-    await cl.Message(content="Starting deliberation...").send()
+    AGENT_TITLES = {
+        "cfo": "CFO (Financial Risk)",
+        "coo": "COO (Operations)",
+        "cmo": "CMO (Market & Customer)",
+        "cto": "CTO (Technical Risk)",
+        "ceo": "CEO (Synthesis)",
+    }
+
+    status_msg = None  # created fresh for each phase
+
+    async def _new_status(text: str):
+        nonlocal status_msg
+        status_msg = cl.Message(content=text)
+        await status_msg.send()
+
+    await _new_status("Starting deliberation...")
 
     # Stream graph in a background thread, pushing state snapshots to a queue
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
+    def _on_progress(event: str, data: dict):
+        """Called from the graph thread when an agent starts working."""
+        if event == "agent_start":
+            agent = data.get("agent", "")
+            phase = data.get("phase", "")
+            idx = data.get("index", 0) + 1
+            total = data.get("total", 4)
+            title = AGENT_TITLES.get(agent, agent.upper())
+            bar = "\u2588" * idx + "\u2591" * (total - idx)
+            label = "Analyzing" if phase == "deliberation" else (
+                "Cross-response" if phase == "cross-response" else "Synthesizing"
+            )
+            text = f"**{label}** [{bar}] {idx}/{total} — {title} is thinking..."
+            asyncio.run_coroutine_threadsafe(
+                queue.put(("progress", text)), loop
+            )
+
     def _stream():
         try:
+            set_progress_callback(_on_progress)
             for state in graph.stream(
                 initial_state, thread_config, stream_mode="values"
             ):
@@ -159,6 +194,8 @@ async def _run_deliberation(task: str):
             asyncio.run_coroutine_threadsafe(
                 queue.put(("error", str(exc))), loop
             )
+        finally:
+            set_progress_callback(None)
 
     stream_future = loop.run_in_executor(None, _stream)
 
@@ -181,6 +218,12 @@ async def _run_deliberation(task: str):
 
         if tag == "done":
             break
+
+        if tag == "progress":
+            if status_msg:
+                status_msg.content = payload
+                await status_msg.update()
+            continue
 
         state = payload
         last_state = state
@@ -212,7 +255,7 @@ async def _run_deliberation(task: str):
             display_round = current_round
             if is_cross:
                 await cl.Message(
-                    content=f"### Cross-Response — Peer Debate"
+                    content="### Cross-Response — Peer Debate"
                 ).send()
             else:
                 await cl.Message(
@@ -223,6 +266,9 @@ async def _run_deliberation(task: str):
                 await _send_agent_output(o)
 
             prev_output_count = len(outputs)
+
+            # Send a fresh status message below the outputs
+            await _new_status("Continuing deliberation...")
 
         # ── Show CEO synthesis ───────────────────────────────────────────
         synthesis = state.get("ceo_synthesis", "")
@@ -236,6 +282,9 @@ async def _run_deliberation(task: str):
             last_synthesis = synthesis
 
     await stream_future
+
+    # Save output count so reconsideration knows where prior outputs end
+    cl.user_session.set("prev_output_count", prev_output_count)
 
     # ── Prompt for human decision ────────────────────────────────────────
     cl.user_session.set("phase", "awaiting_decision")
@@ -256,7 +305,7 @@ async def _run_deliberation(task: str):
             "**Your response:**\n"
             "- **approve** — accept the recommendation\n"
             "- **override** *reason* — override with your decision\n"
-            "- **more info** *question* — ask for clarification"
+            "- **more info** *details* — provide new information for reconsideration"
         )
 
     await cl.Message(content=prompt).send()
@@ -272,27 +321,195 @@ async def _resume_with_decision(human_input: str):
         await cl.Message(content="Session expired. Please refresh.").send()
         return
 
-    cl.user_session.set("phase", "writing_memory")
+    is_more_info = human_input.strip().lower().startswith("more info")
 
-    def _resume():
-        graph.update_state(
-            thread_config,
-            {"human_decision": human_input},
-            as_node="human_interrupt",
-        )
-        for _ in graph.stream(None, thread_config, stream_mode="values"):
-            pass
+    if is_more_info:
+        # The graph will loop back through deliberation and pause again
+        # at human_interrupt — run it the same way as the initial deliberation
+        cl.user_session.set("phase", "running")
 
-    try:
-        await asyncio.get_running_loop().run_in_executor(None, _resume)
         await cl.Message(
-            content="Session complete. Decision written to memory."
+            content="---\n\n**New information received** — sending back to "
+                    "the C-suite for reconsideration...",
         ).send()
-    except Exception as e:
-        await cl.Message(content=f"Error writing to memory: {e}").send()
 
-    # Ready for next task
-    cl.user_session.set("phase", "awaiting_task")
+        AGENT_TITLES = {
+            "cfo": "CFO (Financial Risk)",
+            "coo": "COO (Operations)",
+            "cmo": "CMO (Market & Customer)",
+            "cto": "CTO (Technical Risk)",
+            "ceo": "CEO (Synthesis)",
+        }
+
+        status_msg = None
+
+        async def _new_status(text: str):
+            nonlocal status_msg
+            status_msg = cl.Message(content=text)
+            await status_msg.send()
+
+        await _new_status("Restarting deliberation with new context...")
+
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _on_progress(event: str, data: dict):
+            if event == "agent_start":
+                agent = data.get("agent", "")
+                phase = data.get("phase", "")
+                idx = data.get("index", 0) + 1
+                total = data.get("total", 4)
+                title = AGENT_TITLES.get(agent, agent.upper())
+                bar = "\u2588" * idx + "\u2591" * (total - idx)
+                label = "Analyzing" if phase == "deliberation" else (
+                    "Cross-response" if phase == "cross-response" else "Synthesizing"
+                )
+                text = f"**{label}** [{bar}] {idx}/{total} — {title} is thinking..."
+                asyncio.run_coroutine_threadsafe(
+                    queue.put(("progress", text)), loop
+                )
+
+        def _stream():
+            try:
+                set_progress_callback(_on_progress)
+                graph.update_state(
+                    thread_config,
+                    {"human_decision": human_input},
+                    as_node="human_interrupt",
+                )
+                for state in graph.stream(
+                    None, thread_config, stream_mode="values"
+                ):
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put(("state", dict(state))), loop
+                    )
+                asyncio.run_coroutine_threadsafe(queue.put(("done", None)), loop)
+            except Exception as exc:
+                asyncio.run_coroutine_threadsafe(
+                    queue.put(("error", str(exc))), loop
+                )
+            finally:
+                set_progress_callback(None)
+
+        stream_future = loop.run_in_executor(None, _stream)
+
+        prev_output_count = cl.user_session.get("prev_output_count", 0)
+        last_synthesis = ""
+        current_round = 1
+        last_state = {}
+
+        while True:
+            tag, payload = await queue.get()
+
+            if tag == "error":
+                await cl.Message(
+                    content=f"Deliberation failed:\n\n```\n{payload}\n```"
+                ).send()
+                cl.user_session.set("phase", "awaiting_task")
+                await stream_future
+                return
+
+            if tag == "done":
+                break
+
+            if tag == "progress":
+                if status_msg:
+                    status_msg.content = payload
+                    await status_msg.update()
+                continue
+
+            state = payload
+            last_state = state
+
+            outputs = state.get("agent_outputs", [])
+            if len(outputs) > prev_output_count:
+                new_outputs = outputs[prev_output_count:]
+
+                first = new_outputs[0]
+                is_cross = "_response" in first.get("agent", "")
+                if is_cross:
+                    await cl.Message(
+                        content="### Cross-Response — Peer Debate"
+                    ).send()
+                else:
+                    await cl.Message(
+                        content="### Reconsideration — Independent Analysis"
+                    ).send()
+
+                for o in new_outputs:
+                    await _send_agent_output(o)
+
+                prev_output_count = len(outputs)
+                await _new_status("Continuing deliberation...")
+
+            synthesis = state.get("ceo_synthesis", "")
+            if synthesis and synthesis != last_synthesis:
+                consensus = state.get("consensus_reached", False)
+                label = "Consensus Reached" if consensus else "Conflict Detected"
+                await cl.Message(
+                    content=f"### CEO Synthesis — {label}\n\n{synthesis}",
+                    author="CEO",
+                ).send()
+                last_synthesis = synthesis
+
+        await stream_future
+
+        # Save output count for potential further reconsiderations
+        cl.user_session.set("prev_output_count", prev_output_count)
+
+        # Prompt for decision again
+        cl.user_session.set("phase", "awaiting_decision")
+        escalated = last_state.get("escalate_to_human", False)
+        if escalated:
+            prompt = (
+                "---\n\n"
+                "**Escalated — your decision is required.**\n\n"
+                "The C-suite could not reach consensus. Please respond with:\n"
+                "- Your decision (**proceed** / **block** / **modify**)\n"
+                "- Your reasoning (this becomes institutional memory)\n"
+                "- Any instructions for the team"
+            )
+        else:
+            prompt = (
+                "---\n\n"
+                "**Your response:**\n"
+                "- **approve** — accept the recommendation\n"
+                "- **override** *reason* — override with your decision\n"
+                "- **more info** *details* — provide new information for reconsideration"
+            )
+        await cl.Message(content=prompt).send()
+
+    else:
+        # Approve or override — finalize the session
+        cl.user_session.set("phase", "writing_memory")
+
+        def _resume():
+            graph.update_state(
+                thread_config,
+                {"human_decision": human_input},
+                as_node="human_interrupt",
+            )
+            for _ in graph.stream(None, thread_config, stream_mode="values"):
+                pass
+
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, _resume)
+            await cl.Message(
+                content="Session complete. Decision written to memory."
+            ).send()
+        except Exception as e:
+            await cl.Message(content=f"Error writing to memory: {e}").send()
+
+        # Clean up checkpointer context
+        ctx = cl.user_session.get("checkpointer_ctx")
+        if ctx:
+            try:
+                ctx.__exit__(None, None, None)
+            except Exception:
+                pass
+
+        # Ready for next task
+        cl.user_session.set("phase", "awaiting_task")
     await cl.Message(
         content="You can submit another task or close the session."
     ).send()
@@ -320,11 +537,20 @@ def _list_companies() -> list[dict]:
     return companies
 
 
+AGENT_FULL_NAMES = {
+    "cfo": "CFO — Chief Financial Officer",
+    "coo": "COO — Chief Operating Officer",
+    "cmo": "CMO — Chief Marketing Officer",
+    "cto": "CTO — Chief Technology Officer",
+}
+
+
 async def _send_agent_output(output: dict):
     """Format and send a single agent output as a Chainlit message."""
     raw_agent = output.get("agent", "unknown")
     is_cross = "_response" in raw_agent
-    agent_name = raw_agent.replace("_response", "").upper()
+    agent_key = raw_agent.replace("_response", "")
+    author = AGENT_FULL_NAMES.get(agent_key, agent_key.upper())
     phase_label = " (cross-response)" if is_cross else ""
 
     rec = output.get("recommendation", "?").upper()
@@ -332,8 +558,9 @@ async def _send_agent_output(output: dict):
     analysis = output.get("analysis", "")
     concerns = output.get("concerns", [])
 
-    content = f"**{rec}** · {conf:.0%} confidence{phase_label}\n\n{analysis}"
+    header = f"### {author}{phase_label}\n\n"
+    content = header + f"**{rec}** · {conf:.0%} confidence\n\n{analysis}"
     if concerns:
         content += "\n\n**Concerns:**\n" + "\n".join(f"- {c}" for c in concerns)
 
-    await cl.Message(content=content, author=agent_name).send()
+    await cl.Message(content=content, author=agent_key.upper()).send()

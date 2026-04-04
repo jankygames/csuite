@@ -15,6 +15,7 @@ prevents context window bloat on the worker tier.
 """
 
 import sqlite3
+from pathlib import Path
 
 import chromadb
 from langchain_ollama import OllamaEmbeddings

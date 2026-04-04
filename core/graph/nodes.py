@@ -15,6 +15,7 @@ Node execution order:
 
 import uuid
 from datetime import datetime, timezone
+from typing import Callable, Optional
 
 from core.agents.ceo import CEOAgent
 from core.agents.cfo import CFOAgent
@@ -24,6 +25,21 @@ from core.agents.cto import CTOAgent
 from core.memory.retrieval import retrieve_relevant_memories
 from core.memory.writer import write_session_to_db
 from core.state import AgentOutput
+
+# Optional callback for UI progress updates.
+# Set by the UI layer (app.py) before streaming the graph.
+# Signature: callback(event: str, data: dict) -> None
+_progress_callback: Optional[Callable] = None
+
+
+def set_progress_callback(cb: Optional[Callable]) -> None:
+    global _progress_callback
+    _progress_callback = cb
+
+
+def _notify(event: str, **data) -> None:
+    if _progress_callback:
+        _progress_callback(event, data)
 
 
 # ── Infrastructure nodes ──────────────────────────────────────────────────────
@@ -73,8 +89,11 @@ def round1_deliberation(state: dict) -> dict:
     briefing  = _build_agent_briefing(state, include_prior_outputs=False,
                                        round_num=round_num)
 
-    for AgentClass in [CFOAgent, COOAgent, CMOAgent, CTOAgent]:
+    agents = [CFOAgent, COOAgent, CMOAgent, CTOAgent]
+    for i, AgentClass in enumerate(agents):
         agent  = AgentClass(state["company_config"])
+        _notify("agent_start", agent=agent.role, phase="deliberation",
+                round=round_num, index=i, total=len(agents))
         result = agent.analyze(briefing)
         outputs.append(AgentOutput(
             agent          = agent.role,
@@ -105,8 +124,11 @@ def cross_response(state: dict) -> dict:
                                            round_num=round_num)
     outputs = []
 
-    for AgentClass in [CFOAgent, COOAgent, CMOAgent, CTOAgent]:
+    agents = [CFOAgent, COOAgent, CMOAgent, CTOAgent]
+    for i, AgentClass in enumerate(agents):
         agent  = AgentClass(state["company_config"])
+        _notify("agent_start", agent=agent.role, phase="cross-response",
+                round=round_num, index=i, total=len(agents))
         peers  = [o for o in prior_outputs if o["agent"] != agent.role]
         result = agent.respond_to_peers(briefing, peers)
         outputs.append(AgentOutput(
@@ -136,6 +158,8 @@ def ceo_synthesis(state: dict) -> dict:
     ceo       = CEOAgent(state["company_config"])
     round_num = state.get("debate_round", 1)
     is_final  = round_num >= 2
+    _notify("agent_start", agent="ceo", phase="synthesis", round=round_num,
+            index=0, total=1)
 
     result = ceo.synthesize(
         task           = state["current_task"],
@@ -181,6 +205,47 @@ def human_interrupt_node(state: dict) -> dict:
     _log(f"[HUMAN] {human_decision[:80]}")
     return {
         "messages": [{"role": "user", "content": human_decision}],
+    }
+
+
+def reconsider_with_info(state: dict) -> dict:
+    """
+    The human has provided new information via "more info <details>".
+    Extract the new context, append it to task_context, and reset
+    deliberation state so the C-suite reconsiders from scratch with
+    the full picture.
+
+    Previous agent outputs are preserved (operator.add) so the CEO
+    can see how positions evolved after receiving new information.
+    """
+    raw = state.get("human_decision", "")
+
+    # Strip the "more info" prefix to get the actual new information
+    new_info = raw.strip()
+    for prefix in ("more info", "More info", "MORE INFO"):
+        if new_info.startswith(prefix):
+            new_info = new_info[len(prefix):].strip().lstrip(":").strip()
+            break
+
+    # Append to existing context
+    existing = state.get("task_context", "")
+    separator = "\n\n" if existing else ""
+    updated_context = f"{existing}{separator}[Additional information from owner] {new_info}"
+
+    _log(f"[RECONSIDER] New information received — restarting deliberation")
+
+    return {
+        "task_context":         updated_context,
+        "debate_round":         1,
+        "consensus_reached":    False,
+        "escalate_to_human":    False,
+        "escalation_reason":    "",
+        "ceo_synthesis":        "",
+        "conflicts_identified": [],
+        "human_decision":       None,
+        "messages": [{"role": "system",
+                      "content": f"Owner provided new information: {new_info}. "
+                                 f"Restarting deliberation with updated context."}],
     }
 
 

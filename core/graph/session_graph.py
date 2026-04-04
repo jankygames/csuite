@@ -22,17 +22,20 @@ from core.graph.nodes import (
     ceo_synthesis,
     present_recommendation,
     human_interrupt_node,
+    reconsider_with_info,
     memory_write,
 )
 from core.config import DATA_ROOT
-from core.graph.edges import conflict_router
+from core.graph.edges import conflict_router, human_decision_router
 
 
 def build_session_graph(company_id: str):
     """
     Constructs and compiles the session graph for the given company.
 
-    Returns a compiled LangGraph graph ready to stream.
+    Returns (compiled_graph, checkpointer_context). The caller must keep
+    the context alive for the lifetime of the session — either use it as
+    a context manager or hold a reference until the session ends.
     """
     builder = StateGraph(CompanyState)
 
@@ -44,6 +47,7 @@ def build_session_graph(company_id: str):
     builder.add_node("ceo_synthesis",          ceo_synthesis)
     builder.add_node("present_recommendation", present_recommendation)
     builder.add_node("human_interrupt",        human_interrupt_node)
+    builder.add_node("reconsider_with_info",   reconsider_with_info)
     builder.add_node("memory_write",           memory_write)
 
     # ── Linear edges ──────────────────────────────────────────────────────
@@ -53,8 +57,18 @@ def build_session_graph(company_id: str):
     builder.add_edge("round1_deliberation",    "cross_response")
     builder.add_edge("cross_response",         "ceo_synthesis")
     builder.add_edge("present_recommendation", "human_interrupt")
-    builder.add_edge("human_interrupt",        "memory_write")
+    builder.add_edge("reconsider_with_info",   "round1_deliberation")
     builder.add_edge("memory_write",           END)
+
+    # ── Conditional edge: human decision → finalize or reconsider ────────
+    builder.add_conditional_edges(
+        "human_interrupt",
+        human_decision_router,
+        {
+            "finalize":    "memory_write",
+            "reconsider":  "reconsider_with_info",
+        },
+    )
 
     # ── Conditional edge: CEO synthesis → route on conflict state ─────────
     builder.add_conditional_edges(
@@ -70,9 +84,12 @@ def build_session_graph(company_id: str):
     # ── Checkpointer: per-company SQLite ──────────────────────────────────
     db_path = DATA_ROOT / company_id / f"{company_id}.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    checkpointer = SqliteSaver.from_conn_string(str(db_path))
+    ctx = SqliteSaver.from_conn_string(str(db_path))
+    checkpointer = ctx.__enter__()
 
-    return builder.compile(
+    graph = builder.compile(
         checkpointer=checkpointer,
         interrupt_before=["human_interrupt"],
     )
+
+    return graph, ctx
