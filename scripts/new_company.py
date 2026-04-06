@@ -74,6 +74,9 @@ def scaffold_company(company_id: str, company_name: str, industry: str) -> None:
             ],
         },
 
+        "_comment_codebase_path": "Absolute path to the codebase this company manages. Required for CCA (Claude Code Agent) to execute implementation tasks. Leave empty if not applicable.",
+        "codebase_path": "",
+
         "agent_personalities": {
             "ceo": "Decisive and synthesis-focused. Comfortable with ambiguity "
                    "but demands clarity before committing.",

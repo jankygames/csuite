@@ -35,6 +35,9 @@
     ]
   },
 
+  "_comment_codebase_path": "Absolute path to the codebase this company manages. Required for CCA (Claude Code Agent) to execute implementation tasks. Leave empty if not applicable.",
+  "codebase_path": "",
+
   "agent_personalities": {
     "ceo": "Decisive and synthesis-focused. Pushes for clarity and hates vagueness. Comfortable sitting with ambiguity long enough to understand it, but not longer.",
     "cfo": "Conservative and data-driven. Always asks about runway and unit economics first. Deeply skeptical of growth-at-all-costs arguments that ignore margin.",

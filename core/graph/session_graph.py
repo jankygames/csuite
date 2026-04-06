@@ -23,6 +23,7 @@ from core.graph.nodes import (
     present_recommendation,
     human_interrupt_node,
     reconsider_with_info,
+    spawn_workers,
     memory_write,
 )
 from core.config import DATA_ROOT
@@ -48,6 +49,7 @@ def build_session_graph(company_id: str):
     builder.add_node("present_recommendation", present_recommendation)
     builder.add_node("human_interrupt",        human_interrupt_node)
     builder.add_node("reconsider_with_info",   reconsider_with_info)
+    builder.add_node("spawn_workers",           spawn_workers)
     builder.add_node("memory_write",           memory_write)
 
     # ── Linear edges ──────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ def build_session_graph(company_id: str):
     builder.add_edge("cross_response",         "ceo_synthesis")
     builder.add_edge("present_recommendation", "human_interrupt")
     builder.add_edge("reconsider_with_info",   "round1_deliberation")
+    builder.add_edge("spawn_workers",           "memory_write")
     builder.add_edge("memory_write",           END)
 
     # ── Conditional edge: human decision → finalize or reconsider ────────
@@ -65,7 +68,7 @@ def build_session_graph(company_id: str):
         "human_interrupt",
         human_decision_router,
         {
-            "finalize":    "memory_write",
+            "finalize":    "spawn_workers",
             "reconsider":  "reconsider_with_info",
         },
     )

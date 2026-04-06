@@ -76,3 +76,7 @@ class CompanyState(TypedDict):
 
     # ── Completed decisions — accumulate across tasks in one session ─────────
     decisions_made: Annotated[list[Decision], operator.add]
+
+    # ── Worker agent execution results ──────────────────────────────────────
+    worker_results: list[dict]
+

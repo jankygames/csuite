@@ -17,11 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-from core.agents.ceo import CEOAgent
-from core.agents.cfo import CFOAgent
-from core.agents.coo import COOAgent
-from core.agents.cmo import CMOAgent
-from core.agents.cto import CTOAgent
+from core.agents import CEOAgent, CSUITE_AGENTS, WORKER_AGENTS
 from core.memory.retrieval import retrieve_relevant_memories
 from core.memory.writer import write_session_to_db
 from core.state import AgentOutput
@@ -89,11 +85,10 @@ def round1_deliberation(state: dict) -> dict:
     briefing  = _build_agent_briefing(state, include_prior_outputs=False,
                                        round_num=round_num)
 
-    agents = [CFOAgent, COOAgent, CMOAgent, CTOAgent]
-    for i, AgentClass in enumerate(agents):
+    for i, AgentClass in enumerate(CSUITE_AGENTS):
         agent  = AgentClass(state["company_config"])
         _notify("agent_start", agent=agent.role, phase="deliberation",
-                round=round_num, index=i, total=len(agents))
+                round=round_num, index=i, total=len(CSUITE_AGENTS))
         result = agent.analyze(briefing)
         outputs.append(AgentOutput(
             agent          = agent.role,
@@ -124,11 +119,10 @@ def cross_response(state: dict) -> dict:
                                            round_num=round_num)
     outputs = []
 
-    agents = [CFOAgent, COOAgent, CMOAgent, CTOAgent]
-    for i, AgentClass in enumerate(agents):
+    for i, AgentClass in enumerate(CSUITE_AGENTS):
         agent  = AgentClass(state["company_config"])
         _notify("agent_start", agent=agent.role, phase="cross-response",
-                round=round_num, index=i, total=len(agents))
+                round=round_num, index=i, total=len(CSUITE_AGENTS))
         peers  = [o for o in prior_outputs if o["agent"] != agent.role]
         result = agent.respond_to_peers(briefing, peers)
         outputs.append(AgentOutput(
@@ -247,6 +241,94 @@ def reconsider_with_info(state: dict) -> dict:
                       "content": f"Owner provided new information: {new_info}. "
                                  f"Restarting deliberation with updated context."}],
     }
+
+
+# ── Worker dispatch node ──────────────────────────────────────────────────────
+
+def spawn_workers(state: dict) -> dict:
+    """
+    After human approval, dispatches matching worker agents to execute
+    concrete tasks (coding, comms, research, etc.).
+
+    Gates:
+        - human_decision must start with 'approve' or 'implement'
+        - Each worker's keywords must match the task/synthesis text
+        - Workers may have additional requirements (e.g. CCA needs
+          codebase_path) — if those fail, that worker is skipped
+          with a log warning, not a crash
+
+    Workers run sequentially. Results accumulate in worker_results.
+    """
+    human_decision = (state.get("human_decision") or "").strip().lower()
+
+    if not (human_decision.startswith("approve")
+            or human_decision.startswith("implement")):
+        return {}
+
+    # Build the text to match worker keywords against
+    match_text = " ".join([
+        state.get("current_task", ""),
+        state.get("ceo_synthesis", ""),
+        state.get("human_decision", ""),
+    ])
+
+    config = state.get("company_config", {})
+
+    # Build the task briefing for workers
+    task_parts = []
+    if state.get("current_task"):
+        task_parts.append(f"Task: {state['current_task']}")
+    if state.get("ceo_synthesis"):
+        task_parts.append(f"CEO recommendation: {state['ceo_synthesis']}")
+    if state.get("human_decision"):
+        task_parts.append(f"Owner direction: {state['human_decision']}")
+    task_text = "\n\n".join(task_parts)
+
+    results = []
+    worker_count = 0
+
+    for WorkerClass in WORKER_AGENTS:
+        if not WorkerClass(config={}).can_handle(match_text) \
+                if False else not _worker_matches(WorkerClass, match_text):
+            continue
+
+        worker_count += 1
+        _notify("agent_start", agent=WorkerClass.role, phase="implementation",
+                index=worker_count - 1, total=worker_count)
+
+        try:
+            worker = WorkerClass(config)
+        except ValueError as e:
+            _log(f"[{WorkerClass.role.upper()}] Skipped — {e}")
+            continue
+
+        _log(f"[{WorkerClass.role.upper()}] Dispatching...")
+        result = worker.execute(task_text)
+        results.append(result)
+
+        if result.get("success"):
+            _log(f"[{WorkerClass.role.upper()}] Complete.")
+        else:
+            _log(f"[{WorkerClass.role.upper()}] Failed — "
+                 f"{result.get('summary', '')[:80]}")
+
+    if not results:
+        return {}
+
+    return {
+        "worker_results": results,
+        "messages": [
+            {"role": "assistant",
+             "content": f"[{r.get('worker', '?').upper()}] {r.get('summary', '')[:500]}"}
+            for r in results
+        ],
+    }
+
+
+def _worker_matches(worker_cls, text: str) -> bool:
+    """Check if a worker's keywords match the given text."""
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in worker_cls.keywords)
 
 
 # ── Memory node ───────────────────────────────────────────────────────────────

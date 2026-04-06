@@ -67,6 +67,7 @@ def run_session(company_id: str, task: str, context: str = "") -> None:
         "session_start":       "",
         "ceo_synthesis":       "",
         "conflicts_identified":[],
+        "worker_results":      [],
     }
 
     # ── Stream to interrupt ────────────────────────────────────────────────

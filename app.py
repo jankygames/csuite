@@ -138,6 +138,7 @@ async def _run_deliberation(task: str):
         "session_start":        "",
         "ceo_synthesis":        "",
         "conflicts_identified": [],
+        "worker_results":      [],
     }
 
     # Store graph + thread + checkpointer for resuming after human input

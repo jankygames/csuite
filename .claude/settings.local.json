@@ -19,7 +19,9 @@
       "Bash(pkill -f \"chainlit run\")",
       "Bash(ls /c/Python3*/python.exe)",
       "Read(//c/Program Files/**)",
-      "Read(//c/Users/jay/AppData/Local/Programs/Python/**)"
+      "Read(//c/Users/jay/AppData/Local/Programs/Python/**)",
+      "Bash(where claude:*)",
+      "Bash(claude --version)"
     ]
   }
 }
