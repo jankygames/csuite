@@ -65,6 +65,8 @@ Rules:
 
 # ── LLM factory ─────────────────────────────────────────────────────────────
 
+DEFAULT_CONTEXT_LENGTH = 32768
+
 def build_llm(company_config: dict, temperature: float = 0.7, max_tokens: int = 2048):
     """
     Build the appropriate LLM instance based on company config.
@@ -72,9 +74,11 @@ def build_llm(company_config: dict, temperature: float = 0.7, max_tokens: int = 
     Config fields:
         model_provider  — "ollama" (default) or "anthropic"
         model_name      — override the default model for the chosen provider
+        context_length  — context window size for Ollama (default: 32768)
     """
-    provider   = company_config.get("model_provider", "ollama").lower()
-    model_name = company_config.get("model_name", "")
+    provider       = company_config.get("model_provider", "ollama").lower()
+    model_name     = company_config.get("model_name", "")
+    context_length = company_config.get("context_length", DEFAULT_CONTEXT_LENGTH)
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
@@ -90,6 +94,7 @@ def build_llm(company_config: dict, temperature: float = 0.7, max_tokens: int = 
             base_url    = OLLAMA_BASE,
             temperature = temperature,
             num_predict = max_tokens,
+            num_ctx     = int(context_length),
         )
 
 

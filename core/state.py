@@ -56,6 +56,7 @@ class CompanyState(TypedDict):
     relevant_memories: list[dict]
 
     # ── Deliberation tracking ────────────────────────────────────────────────
+    prior_decision_found: bool   # True if memory has a close match — skip deliberation
     debate_round:   int          # increments each time we loop back
 
     # ── Agent outputs — operator.add means these ACCUMULATE across nodes ─────

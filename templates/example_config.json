@@ -17,6 +17,10 @@
     "Must remain profitable each month"
   ],
 
+  "model_provider": "ollama",
+  "model_name": "gpt-oss:20b",
+  "context_length": 32768,
+
   "risk_profile": "moderate",
   "decision_style": "data-driven with bias toward action",
 

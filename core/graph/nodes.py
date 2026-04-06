@@ -72,6 +72,67 @@ def memory_retrieval(state: dict) -> dict:
     return {"relevant_memories": memories}
 
 
+def prior_decision_check(state: dict) -> dict:
+    """
+    Checks if a closely matching prior decision exists in retrieved memories.
+    If so, the CEO summarizes the prior decision and skips deliberation.
+    If not, passes through with no state changes (deliberation proceeds).
+
+    A match is determined by high semantic similarity (>= 0.85) from
+    ChromaDB, meaning the current task is essentially the same question
+    that was already decided.
+    """
+    SIMILARITY_THRESHOLD = 0.85
+    memories = state.get("relevant_memories", [])
+    task = state.get("current_task", "")
+
+    # Find the best semantic match
+    best_match = None
+    for m in memories:
+        score = m.get("similarity_score")
+        if score is not None and score >= SIMILARITY_THRESHOLD:
+            if best_match is None or score > best_match.get("similarity_score", 0):
+                best_match = m
+
+    if not best_match:
+        # No close match — proceed to deliberation
+        return {"prior_decision_found": False}
+
+    _log(f"[MEMORY] Prior decision found (similarity: "
+         f"{best_match['similarity_score']:.0%}) — skipping deliberation.")
+
+    # Build a synthesis from the prior decision
+    prior_task = best_match.get("task", "")
+    prior_outcome = best_match.get("outcome", "")
+    prior_reasoning = best_match.get("reasoning", "")
+    prior_override = best_match.get("human_override", "")
+
+    synthesis_parts = [
+        f"This topic has already been decided in a prior session.",
+        f"",
+        f"**Prior task:** {prior_task}",
+        f"**Decision:** {prior_outcome}",
+    ]
+    if prior_reasoning:
+        synthesis_parts.append(f"**Reasoning:** {prior_reasoning}")
+    if prior_override:
+        synthesis_parts.append(f"**Owner directive:** {prior_override}")
+    synthesis_parts.append(
+        f"\nIf circumstances have changed, provide new information "
+        f"via 'more info' to trigger a fresh deliberation."
+    )
+
+    synthesis = "\n".join(synthesis_parts)
+
+    return {
+        "prior_decision_found": True,
+        "ceo_synthesis":        synthesis,
+        "consensus_reached":    True,
+        "escalate_to_human":    False,
+        "messages": [{"role": "assistant", "content": synthesis}],
+    }
+
+
 # ── Deliberation nodes ────────────────────────────────────────────────────────
 
 def round1_deliberation(state: dict) -> dict:
@@ -251,7 +312,8 @@ def spawn_workers(state: dict) -> dict:
     concrete tasks (coding, comms, research, etc.).
 
     Gates:
-        - human_decision must start with 'approve' or 'implement'
+        - human_decision must start with 'implement' (not 'approve' —
+          approve finalizes without execution, implement triggers workers)
         - Each worker's keywords must match the task/synthesis text
         - Workers may have additional requirements (e.g. CCA needs
           codebase_path) — if those fail, that worker is skipped
@@ -261,8 +323,7 @@ def spawn_workers(state: dict) -> dict:
     """
     human_decision = (state.get("human_decision") or "").strip().lower()
 
-    if not (human_decision.startswith("approve")
-            or human_decision.startswith("implement")):
+    if not human_decision.startswith("implement"):
         return {}
 
     # Build the text to match worker keywords against
@@ -288,8 +349,7 @@ def spawn_workers(state: dict) -> dict:
     worker_count = 0
 
     for WorkerClass in WORKER_AGENTS:
-        if not WorkerClass(config={}).can_handle(match_text) \
-                if False else not _worker_matches(WorkerClass, match_text):
+        if not _worker_matches(WorkerClass, match_text):
             continue
 
         worker_count += 1

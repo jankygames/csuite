@@ -17,6 +17,7 @@ from core.state import CompanyState
 from core.graph.nodes import (
     task_intake,
     memory_retrieval,
+    prior_decision_check,
     round1_deliberation,
     cross_response,
     ceo_synthesis,
@@ -27,7 +28,11 @@ from core.graph.nodes import (
     memory_write,
 )
 from core.config import DATA_ROOT
-from core.graph.edges import conflict_router, human_decision_router
+from core.graph.edges import (
+    prior_decision_router,
+    conflict_router,
+    human_decision_router,
+)
 
 
 def build_session_graph(company_id: str):
@@ -43,6 +48,7 @@ def build_session_graph(company_id: str):
     # ── Register nodes ────────────────────────────────────────────────────
     builder.add_node("task_intake",            task_intake)
     builder.add_node("memory_retrieval",       memory_retrieval)
+    builder.add_node("prior_decision_check",   prior_decision_check)
     builder.add_node("round1_deliberation",    round1_deliberation)
     builder.add_node("cross_response",         cross_response)
     builder.add_node("ceo_synthesis",          ceo_synthesis)
@@ -55,13 +61,23 @@ def build_session_graph(company_id: str):
     # ── Linear edges ──────────────────────────────────────────────────────
     builder.set_entry_point("task_intake")
     builder.add_edge("task_intake",            "memory_retrieval")
-    builder.add_edge("memory_retrieval",       "round1_deliberation")
+    builder.add_edge("memory_retrieval",       "prior_decision_check")
     builder.add_edge("round1_deliberation",    "cross_response")
     builder.add_edge("cross_response",         "ceo_synthesis")
     builder.add_edge("present_recommendation", "human_interrupt")
     builder.add_edge("reconsider_with_info",   "round1_deliberation")
     builder.add_edge("spawn_workers",           "memory_write")
     builder.add_edge("memory_write",           END)
+
+    # ── Conditional edge: prior decision → skip or deliberate ──────────
+    builder.add_conditional_edges(
+        "prior_decision_check",
+        prior_decision_router,
+        {
+            "already_decided": "present_recommendation",
+            "deliberate":      "round1_deliberation",
+        },
+    )
 
     # ── Conditional edge: human decision → finalize or reconsider ────────
     builder.add_conditional_edges(

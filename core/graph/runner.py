@@ -57,6 +57,7 @@ def run_session(company_id: str, task: str, context: str = "") -> None:
         "relevant_memories":   [],
         "agent_outputs":       [],
         "messages":            [],
+        "prior_decision_found":False,
         "consensus_reached":   False,
         "escalate_to_human":   False,
         "escalation_reason":   "",

@@ -21,7 +21,8 @@
       "Read(//c/Program Files/**)",
       "Read(//c/Users/jay/AppData/Local/Programs/Python/**)",
       "Bash(where claude:*)",
-      "Bash(claude --version)"
+      "Bash(claude --version)",
+      "WebSearch"
     ]
   }
 }

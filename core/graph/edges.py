@@ -8,11 +8,25 @@ the current state and return a string key. That key maps to the next
 node name in the graph's routing table.
 
 Currently defined edges:
+    prior_decision_router  — routes after memory check (skip or deliberate)
     conflict_router        — routes after CEO synthesis based on consensus state
     human_decision_router  — routes after human response (approve/override/more info)
 """
 
 MAX_DEBATE_ROUNDS = 2
+
+
+def prior_decision_router(state: dict) -> str:
+    """
+    Called after prior_decision_check.
+
+    If a closely matching prior decision was found, skip deliberation
+    and go straight to presenting the prior decision to the human.
+    Otherwise, proceed to full deliberation.
+    """
+    if state.get("prior_decision_found", False):
+        return "already_decided"
+    return "deliberate"
 
 
 def conflict_router(state: dict) -> str:

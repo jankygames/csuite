@@ -86,7 +86,7 @@ Python version: 3.11.x (specific — not 3.12/3.13)
 ## Inference Stack
 
 - Runtime: Ollama (http://localhost:11434)
-- Primary model: qwen2.5:32b-instruct-q4_K_M
+- Primary model: gpt-oss:20b
 - Embedding model: nomic-embed-text (768 dimensions)
 
 Verify both are available:
@@ -100,17 +100,21 @@ ollama list
 
 - [x] core/state.py              — CompanyState TypedDict with operator.add fields
 - [x] core/agents/base.py        — BaseAgent: LLM call, hybrid parser, retry logic
+- [x] core/agents/base_worker.py — BaseWorker: abstract base for worker-tier agents
 - [x] core/agents/ceo.py         — CEO: synthesis, presentation, escalation enforcement
 - [x] core/agents/cfo.py         — CFO: financial risk lens
 - [x] core/agents/coo.py         — COO: operational feasibility lens
 - [x] core/agents/cmo.py         — CMO: market and customer lens
 - [x] core/agents/cto.py         — CTO: technical risk lens
+- [x] core/agents/cca.py         — CCA: Claude Code Agent (worker tier)
+- [x] core/agents/__init__.py    — Agent registries (CSUITE_AGENTS, WORKER_AGENTS)
 - [x] core/graph/session_graph.py — LangGraph graph builder + compiler
-- [x] core/graph/nodes.py         — All node functions
-- [x] core/graph/edges.py         — conflict_router conditional edge
+- [x] core/graph/nodes.py         — All node functions incl. spawn_workers
+- [x] core/graph/edges.py         — conflict_router + human_decision_router
 - [x] core/graph/runner.py        — CLI entry point
 - [x] core/memory/retrieval.py    — ChromaDB semantic search + SQLite queries
 - [x] core/memory/writer.py       — SQLite write + ChromaDB embed
+- [x] core/tools/cca_tool.py      — Direct CCA invocation wrapper
 - [x] scripts/new_company.py      — Company scaffolding script
 - [x] templates/example_config.json — Example DNA config template
 - [x] core/config.py              — Centralised path config (env vars)
@@ -124,7 +128,7 @@ ollama list
 - [ ] Dynamic escalation thresholds (tie to FCF / financial data)
 - [ ] Financial data integration (financials table in SQLite, agent-queryable)
 - [ ] Knowledge ingestion pipeline (load docs into semantic memory)
-- [ ] Worker agent tier (subordinate to C-suite, executes tasks)
+- [x] Worker agent tier (CCA + extensible registry via WORKER_AGENTS)
 - [ ] Multi-task agenda handling (queue of tasks in one session)
 - [ ] Agent memory review / decision audit trail
 - [ ] Multi-company dashboard

@@ -5,8 +5,9 @@ team. Spin up multiple independent "company instances," each with its own
 C-suite that deliberates on decisions, debates internally, and brings you
 structured recommendations. You are the final decision-maker.
 
-Built on **LangGraph**, **Ollama**, and **Qwen2.5 32B** — runs entirely on
-your local machine with no cloud dependencies.
+Built on **LangGraph** and **Ollama** — runs entirely on your local machine
+with no cloud dependencies. Supports hybrid model providers (Ollama for local
+inference, Anthropic API as an option) configurable per company.
 
 ---
 
@@ -33,13 +34,14 @@ your local machine with no cloud dependencies.
 You interact with a **CEO agent** that manages a team of four executive agents
 (CFO, COO, CMO, CTO). When you bring a task or decision to a company:
 
-1. All four agents independently analyze the task
+1. All C-suite agents independently analyze the task
 2. Agents read each other's positions and respond directly (the debate round)
-3. The CEO synthesizes all eight outputs into a recommendation
+3. The CEO synthesizes all outputs into a recommendation
 4. If agents are deadlocked, the CEO forces a second round with explicit conflict framing
 5. The CEO presents you the full deliberation — every agent's reasoning in detail
-6. You approve, override, or ask for more information
-7. Everything is written to memory for future context
+6. You approve, override, or provide new information for reconsideration
+7. If approved, matching worker agents execute implementation tasks (e.g. CCA writes code)
+8. Everything is written to memory for future context
 
 The system is **repeatable** — each company is an isolated instance with its
 own configuration, history, and memory. Spinning up Company B costs nothing
@@ -55,14 +57,18 @@ You (final decision-maker)
         ▼
    CEO Agent  ◄──── sole interface to you
         │
-        ├── CFO Agent  (financial risk)
-        ├── COO Agent  (operational feasibility)
-        ├── CMO Agent  (market and customer impact)
-        └── CTO Agent  (technical risk)
+        ├── C-Suite Tier (deliberation)
+        │   ├── CFO Agent  (financial risk)
+        │   ├── COO Agent  (operational feasibility)
+        │   ├── CMO Agent  (market and customer impact)
+        │   └── CTO Agent  (technical risk)
+        │
+        └── Worker Tier (execution — runs after human approval)
+            └── CCA Agent  (Claude Code Agent — edits code, runs commands)
+            └── [future: comms, research, art, etc.]
                 │
                 ▼
-        Ollama Inference Server
-        Qwen2.5 32B · Q4_K_M · GPU-resident
+        Ollama Inference Server (default, configurable per company)
                 │
                 ▼
         Hardware
@@ -71,13 +77,18 @@ You (final decision-maker)
         HDD (F:, G:) for logs and company data
 ```
 
+**Two agent tiers:**
+- **C-suite agents** deliberate on decisions. They are registered in
+  `CSUITE_AGENTS` (`core/agents/__init__.py`) and run sequentially.
+- **Worker agents** execute concrete tasks after human approval. They are
+  registered in `WORKER_AGENTS` and auto-dispatched by keyword matching.
+
 **Orchestration:** LangGraph — stateful agent graphs with native
 human-in-the-loop interrupt support and clean multi-instance isolation.
 
-**Inference:** All agents share one Ollama server. No parallelism — one
-model call at a time. This is by design: a 32B model at Q4_K_M quantization
-uses ~19 GB VRAM, leaving 5 GB headroom. Running multiple model instances
-would exceed VRAM and cause thrashing.
+**Inference:** Configurable per company via `model_provider` in config.json.
+Default is Ollama (local). Anthropic API is also supported. All agents within
+a company share the same provider.
 
 **Embeddings:** `nomic-embed-text` via Ollama. 768-dimensional vectors.
 Fast, lightweight, runs alongside the main model.
@@ -166,8 +177,17 @@ CEO synthesis
     ▼
 Human interrupt (LangGraph pauses · waits for your input)
     │
-    ▼
-Memory write (SQLite + ChromaDB)
+    ├── "approve" / "implement" ──► Worker dispatch (CCA, etc.)
+    │                                     │
+    │                                     ▼
+    │                               Memory write
+    │
+    ├── "override <reason>" ──► Memory write (records override)
+    │
+    └── "more info <details>" ──► Reconsider with new info
+                                      │
+                                      ▼
+                                 Back to Round 1 (full re-deliberation)
     │
     ▼
 Next task or end session
@@ -224,6 +244,35 @@ Honest about when an argument is brand judgment vs. data.
 **Behavioral trait:** Speaks plainly — avoids jargon or explains it immediately.
 Flags security and reliability concerns every time, even if the room is comfortable.
 
+### Worker Tier
+
+Workers sit below the C-suite. They execute concrete tasks after human approval
+rather than deliberating on strategy. Each worker declares keywords that trigger
+it automatically when the task/synthesis matches.
+
+### CCA — Claude Code Agent
+**Tier:** Worker (execution)  
+**Trigger keywords:** code, implement, build, develop, deploy, refactor, fix bug, ...  
+**What it does:** Spawns a local Claude Code subprocess pointed at the company's
+`codebase_path`. Edits files, runs commands, creates assets, reports back results.  
+**Requires:** `codebase_path` set in company config.json  
+**Safety:** Only invoked after explicit human approval (`approve` or `implement`).
+Never runs during deliberation.
+
+### Adding New Agents
+
+**New C-suite agent** (e.g. CISO, Chief Art Director):
+1. Create `core/agents/<role>.py` extending `BaseAgent`
+2. Import and append to `CSUITE_AGENTS` in `core/agents/__init__.py`
+3. Add personality to company `config.json`
+
+**New worker agent** (e.g. comms, research, art):
+1. Create `core/agents/<role>.py` extending `BaseWorker`
+2. Define `role`, `title`, `keywords`, and `execute(task) -> dict`
+3. Import and append to `WORKER_AGENTS` in `core/agents/__init__.py`
+
+The graph picks up new agents automatically — no graph or node changes needed.
+
 ---
 
 ## Repository Structure
@@ -238,13 +287,15 @@ D:\csuite\
 │   ├── state.py                    ← LangGraph CompanyState TypedDict
 │   │
 │   ├── agents\
-│   │   ├── __init__.py
-│   │   ├── base.py                 ← Shared LLM call, hybrid parser, retry logic
-│   │   ├── ceo.py                  ← CEO synthesis, presentation, escalation rules
+│   │   ├── __init__.py             ← Agent registries (CSUITE_AGENTS, WORKER_AGENTS)
+│   │   ├── base.py                 ← C-suite base: LLM call, hybrid parser, retry
+│   │   ├── base_worker.py          ← Worker base: execute interface, keyword matching
+│   │   ├── ceo.py                  ← CEO: synthesis, presentation, escalation rules
 │   │   ├── cfo.py                  ← CFO: financial risk
 │   │   ├── coo.py                  ← COO: operational feasibility
 │   │   ├── cmo.py                  ← CMO: market and customer impact
-│   │   └── cto.py                  ← CTO: technical risk
+│   │   ├── cto.py                  ← CTO: technical risk
+│   │   └── cca.py                  ← CCA: Claude Code Agent (worker tier)
 │   │
 │   ├── graph\
 │   │   ├── __init__.py
@@ -259,7 +310,8 @@ D:\csuite\
 │   │   └── writer.py               ← Flush session to SQLite + embed to ChromaDB
 │   │
 │   └── tools\
-│       └── __init__.py             ← Placeholder for future worker agent tools
+│       ├── __init__.py
+│       └── cca_tool.py             ← Direct invocation wrapper for CCA
 │
 ├── templates\
 │   └── example_config.json         ← Company DNA template (copy when creating)
@@ -299,10 +351,10 @@ F:\csuite_logs\                     ← CSUITE_LOG_ROOT — Session logs (HDD)
 | SSD free | 40 GB | D:\ + E:\ |
 | OS | Windows 10 | Windows 10 Pro |
 
-The **RTX 3090's 24 GB VRAM** is the critical resource. Qwen2.5 32B at
-Q4_K_M quantization uses approximately 19 GB, leaving ~5 GB for the KV
-cache during inference. The 64 GB RAM provides ample CPU offload headroom
-and headroom for ChromaDB + SQLite operations.
+The **RTX 3090's 24 GB VRAM** is the critical resource. The default model
+(`gpt-oss:20b`) fits comfortably with headroom for KV cache. The 64 GB RAM
+provides ample CPU offload headroom and headroom for ChromaDB + SQLite
+operations.
 
 ---
 
@@ -333,7 +385,7 @@ pip install --upgrade pip
 
 **4. Pull models**
 ```bash
-ollama pull qwen2.5:32b-instruct-q4_K_M   # ~20 GB download
+ollama pull gpt-oss:20b                   # primary model
 ollama pull nomic-embed-text               # ~250 MB download
 ```
 
@@ -435,6 +487,9 @@ python -m core.graph.runner `
 | `escalation_rules.always_escalate` | list | Any task matching these patterns triggers escalation regardless of consensus. |
 | `escalation_rules.escalate_if_deadlock` | bool | Escalate after round 2 if still deadlocked. |
 | `escalation_rules.ceo_can_decide_alone` | list | Topics the CEO may resolve without escalating. |
+| `model_provider` | string | `"ollama"` (default) or `"anthropic"` — which LLM backend to use. |
+| `model_name` | string | Override default model for the chosen provider. Default: `gpt-oss:20b` (ollama). |
+| `codebase_path` | string | Absolute path to the codebase this company manages. Required for CCA worker. |
 | `agent_personalities.*` | string | Per-agent behavioral description. Injected into each agent's system prompt. |
 
 ---
@@ -505,8 +560,7 @@ The foundation is complete. Planned additions in order:
 7. **Knowledge ingestion pipeline** — load company documents, market data,
    and competitor information into the semantic memory store so agents have
    real context beyond what's in the task prompt
-8. **Worker agent tier** — agents subordinate to the C-suite that execute
-   tasks (research, drafting, analysis) rather than deliberating on strategy
+8. ~~**Worker agent tier**~~ — **done** (CCA implemented, extensible registry for future workers)
 9. **Multi-task agenda** — handle a queue of tasks in one session rather
    than one task per session
 

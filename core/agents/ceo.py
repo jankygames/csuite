@@ -232,7 +232,8 @@ class CEOAgent:
             lines.append("  • Brief reasoning (this becomes institutional memory)")
             lines.append("  • Any instructions for the team going forward")
         else:
-            rec = state.get("decisions_made", [{}])[-1].get("outcome", "")
+            decisions = state.get("decisions_made", [])
+            rec = decisions[-1].get("outcome", "") if decisions else ""
             lines.append(f"CEO RECOMMENDATION: {rec.upper() if rec else 'SEE SYNTHESIS'}")
             lines.append("─" * 70)
             lines.append("")

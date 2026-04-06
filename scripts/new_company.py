@@ -56,6 +56,10 @@ def scaffold_company(company_id: str, company_name: str, industry: str) -> None:
             "[Edit this] Constraint 2",
         ],
 
+        "model_provider":  "ollama",
+        "model_name":      "gpt-oss:20b",
+        "context_length":  32768,
+
         "risk_profile":   "moderate",
         "decision_style": "data-driven with bias toward action",
 

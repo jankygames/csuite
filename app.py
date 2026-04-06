@@ -128,6 +128,7 @@ async def _run_deliberation(task: str):
         "relevant_memories":    [],
         "agent_outputs":        [],
         "messages":             [],
+        "prior_decision_found": False,
         "consensus_reached":    False,
         "escalate_to_human":    False,
         "escalation_reason":    "",
@@ -307,7 +308,8 @@ async def _run_deliberation(task: str):
         prompt = (
             "---\n\n"
             "**Your response:**\n"
-            "- **approve** — accept the recommendation\n"
+            "- **approve** — accept the recommendation (no implementation)\n"
+            "- **implement** — approve and dispatch workers to execute (e.g. CCA writes code)\n"
             "- **override** *reason* — override with your decision\n"
             "- **more info** *details* — provide new information for reconsideration"
         )
@@ -477,15 +479,24 @@ async def _resume_with_decision(human_input: str):
             prompt = (
                 "---\n\n"
                 "**Your response:**\n"
-                "- **approve** — accept the recommendation\n"
+                "- **approve** — accept the recommendation (no implementation)\n"
+                "- **implement** — approve and dispatch workers to execute (e.g. CCA writes code)\n"
                 "- **override** *reason* — override with your decision\n"
                 "- **more info** *details* — provide new information for reconsideration"
             )
         await cl.Message(content=prompt).send()
 
     else:
-        # Approve or override — finalize the session
+        # Approve, implement, or override — finalize the session
         cl.user_session.set("phase", "writing_memory")
+
+        is_implement = human_input.strip().lower().startswith("implement")
+        if is_implement:
+            await cl.Message(
+                content="**Dispatching workers...**"
+            ).send()
+
+        final_states = []
 
         def _resume():
             graph.update_state(
@@ -493,16 +504,54 @@ async def _resume_with_decision(human_input: str):
                 {"human_decision": human_input},
                 as_node="human_interrupt",
             )
-            for _ in graph.stream(None, thread_config, stream_mode="values"):
-                pass
+            for state in graph.stream(
+                None, thread_config, stream_mode="values"
+            ):
+                final_states.append(dict(state))
 
         try:
             await asyncio.get_running_loop().run_in_executor(None, _resume)
+
+            # Show worker results if any workers ran
+            final_state = final_states[-1] if final_states else {}
+            worker_results = final_state.get("worker_results", [])
+
+            if worker_results:
+                for r in worker_results:
+                    worker_name = r.get("worker", "unknown").upper()
+                    success = r.get("success", False)
+                    summary = r.get("summary", "")
+                    files = r.get("files_changed", [])
+
+                    status = "completed" if success else "failed"
+                    parts = [f"### {worker_name} — {status}\n"]
+
+                    if summary:
+                        parts.append(summary[:1000])
+                    if files:
+                        parts.append(
+                            "\n**Files changed:**\n"
+                            + "\n".join(f"- `{f}`" for f in files)
+                        )
+                    if not success:
+                        error = r.get("output", "")
+                        if error:
+                            parts.append(f"\n**Output:**\n```\n{error[:500]}\n```")
+
+                    await cl.Message(
+                        content="\n".join(parts), author=worker_name
+                    ).send()
+            elif is_implement:
+                await cl.Message(
+                    content="No matching workers found for this task. "
+                            "Decision recorded without implementation."
+                ).send()
+
             await cl.Message(
                 content="Session complete. Decision written to memory."
             ).send()
         except Exception as e:
-            await cl.Message(content=f"Error writing to memory: {e}").send()
+            await cl.Message(content=f"Error: {e}").send()
 
         # Clean up checkpointer context
         ctx = cl.user_session.get("checkpointer_ctx")
