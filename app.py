@@ -434,7 +434,7 @@ async def _resume_with_decision(human_input: str):
                 await cl.Message(
                     content=f"Deliberation failed:\n\n```\n{payload}\n```"
                 ).send()
-                cl.user_session.set("phase", "awaiting_task")
+                cl.user_session.set("phase", "ready")
                 await stream_future
                 return
 
@@ -659,7 +659,11 @@ async def _ceo_chat(message: str):
     prompt_parts.append(f"\n--- OWNER SAYS ---\n{message}")
 
     prompt = "\n\n".join(prompt_parts)
-    response = invoke_llm(ceo.llm, prompt)
+
+    # Run LLM call in executor to avoid blocking the event loop
+    response = await asyncio.get_running_loop().run_in_executor(
+        None, invoke_llm, ceo.llm, prompt
+    )
 
     await cl.Message(content=response, author="CEO").send()
 
