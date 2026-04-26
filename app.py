@@ -24,7 +24,7 @@ load_dotenv()
 
 import chainlit as cl
 
-from core.config import COMPANY_ROOT
+from core.config import COMPANY_ROOT, get_tunable
 from core.graph.session_graph import build_session_graph
 from core.graph.nodes import set_progress_callback
 
@@ -98,11 +98,13 @@ async def on_message(message: cl.Message):
             cl.user_session.set("phase", "ready")
 
         # Track conversation history for context
+        config = cl.user_session.get("company_config") or {}
+        max_history = get_tunable(config, "chat_history_length")
+
         chat_history = cl.user_session.get("chat_history") or []
         chat_history.append({"role": "user", "content": message.content})
-        # Keep last 10 exchanges
-        if len(chat_history) > 20:
-            chat_history = chat_history[-20:]
+        if len(chat_history) > max_history:
+            chat_history = chat_history[-max_history:]
         cl.user_session.set("chat_history", chat_history)
 
         # Fast-path keyword check, then LLM fallback
@@ -626,11 +628,14 @@ async def _classify_intent_full(text: str, chat_history: list) -> str:
     config = cl.user_session.get("company_config") or {}
     llm = build_llm(config, temperature=0.0, max_tokens=100)
 
+    config = cl.user_session.get("company_config") or {}
+    msg_cap = get_tunable(config, "chat_message_cap")
+
     history_text = ""
     if chat_history and len(chat_history) > 1:
         recent = chat_history[-6:]
         history_text = "Recent conversation:\n" + "\n".join(
-            f"{'Owner' if m['role'] == 'user' else 'CEO'}: {m['content'][:200]}"
+            f"{'Owner' if m['role'] == 'user' else 'CEO'}: {m['content'][:msg_cap]}"
             for m in recent
         ) + "\n\n"
 
@@ -699,10 +704,11 @@ async def _ceo_chat(message: str):
         )
 
     # Include recent conversation history
+    msg_cap_chat = get_tunable(config, "chat_message_cap")
     chat_history = cl.user_session.get("chat_history") or []
     if len(chat_history) > 1:
         history_text = "\n".join(
-            f"{'Owner' if m['role'] == 'user' else 'CEO'}: {m['content'][:500]}"
+            f"{'Owner' if m['role'] == 'user' else 'CEO'}: {m['content'][:msg_cap_chat]}"
             for m in chat_history[:-1]  # exclude the current message
         )
         prompt_parts.append(f"\n--- RECENT CONVERSATION ---\n{history_text}")
@@ -782,8 +788,9 @@ async def _run_workers_direct(message: str):
             from core.agents.ceo import CEOAgent
             ceo = CEOAgent(config)
 
+            msg_cap = get_tunable(config, "chat_message_cap")
             history_text = "\n".join(
-                f"{'Owner' if m['role'] == 'user' else 'CEO'}: {m['content'][:2000]}"
+                f"{'Owner' if m['role'] == 'user' else 'CEO'}: {m['content'][:msg_cap]}"
                 for m in chat_history[-10:]
             )
 

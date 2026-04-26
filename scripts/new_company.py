@@ -64,6 +64,13 @@ def scaffold_company(company_id: str, company_name: str, industry: str) -> None:
         "index_threshold":     5,
         "index_version_days":  7,
 
+        "chat_history_length": 20,
+        "chat_message_cap":    10000,
+        "cca_max_turns":       50,
+        "worker_max_tokens":   4096,
+        "ceo_chat_max_tokens": 2048,
+        "knowledge_max_pct":   50,
+
         "risk_profile":   "moderate",
         "decision_style": "data-driven with bias toward action",
 

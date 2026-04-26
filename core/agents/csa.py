@@ -28,7 +28,9 @@ class CSAAgent(BaseWorker):
 
     def __init__(self, company_config: dict):
         super().__init__(company_config)
-        self.llm = build_llm(company_config, temperature=0.8, max_tokens=3072)
+        from core.config import get_tunable
+        self.llm = build_llm(company_config, temperature=0.8,
+                             max_tokens=get_tunable(company_config, "worker_max_tokens"))
         self.config = company_config
 
     def build_prompt(self, task: str) -> str:

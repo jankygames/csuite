@@ -22,3 +22,22 @@ from pathlib import Path
 COMPANY_ROOT = Path(os.environ.get("CSUITE_COMPANY_ROOT", "G:/csuite_data/companies"))
 DATA_ROOT    = Path(os.environ.get("CSUITE_DATA_ROOT",    "G:/csuite_data"))
 LOG_ROOT     = Path(os.environ.get("CSUITE_LOG_ROOT",     "F:/csuite_logs"))
+
+# ── Default tunables (overridable per company in config.json) ────────────────
+
+DEFAULTS = {
+    "chat_history_length":    20,     # max messages kept in conversation history
+    "chat_message_cap":       10000,  # max chars per message in history context
+    "cca_max_turns":          50,     # max turns per session
+    "worker_max_tokens":      4096,   # max output tokens for non-interactive workers
+    "ceo_chat_max_tokens":    2048,   # max output tokens for CEO conversational replies
+    "knowledge_max_pct":      50,     # max % of context_length for knowledge.md
+}
+
+
+def get_tunable(company_config: dict, key: str):
+    """
+    Read a tunable setting from company config, falling back to DEFAULTS.
+    Company config values override defaults.
+    """
+    return company_config.get(key, DEFAULTS.get(key))

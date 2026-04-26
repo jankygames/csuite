@@ -66,11 +66,12 @@ class CCAAgent(BaseWorker):
 
     def _build_options(self, resume: str | None = None):
         from claude_code_sdk import ClaudeCodeOptions
+        from core.config import get_tunable
         opts = ClaudeCodeOptions(
             model=self.model,
             cwd=str(self.codebase_path),
             permission_mode="acceptEdits",
-            max_turns=50,
+            max_turns=get_tunable(self.config, "cca_max_turns"),
             system_prompt=(
                 f"You are a developer working on the codebase for {self.company}. "
                 f"Your job is to IMPLEMENT — write code, create files, edit files, "
