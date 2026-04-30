@@ -69,6 +69,11 @@ async def _load_company(company_id: str):
     cl.user_session.set("company_config", config)
     cl.user_session.set("phase", "ready")
 
+    # Restore chat history from SQLite
+    from core.memory.writer import load_chat_history
+    history = load_chat_history(company_id, limit=get_tunable(config, "chat_history_length"))
+    cl.user_session.set("chat_history", history)
+
     priorities = "\n".join(
         f"- {p}" for p in config.get("strategic_priorities", [])
     )
@@ -126,13 +131,33 @@ async def on_message(message: cl.Message):
         await _continue_cca_session(message.content)
 
     elif phase == "running":
-        await cl.Message(
-            content="Deliberation in progress. Please wait for it to finish."
-        ).send()
+        if message.content.strip().lower() == "reset":
+            cl.user_session.set("phase", "ready")
+            await cl.Message(
+                content="Session reset. You can start fresh."
+            ).send()
+        else:
+            await cl.Message(
+                content="Deliberation in progress. Please wait for it to finish.\n\n"
+                        "If the system appears stuck, type **reset** to recover."
+            ).send()
+
+    elif phase == "writing_memory":
+        if message.content.strip().lower() == "reset":
+            cl.user_session.set("phase", "ready")
+            await cl.Message(
+                content="Session reset. You can start fresh."
+            ).send()
+        else:
+            await cl.Message(
+                content="Writing to memory. Please wait.\n\n"
+                        "If stuck, type **reset** to recover."
+            ).send()
 
     else:
+        cl.user_session.set("phase", "ready")
         await cl.Message(
-            content="No active session. Please refresh to start."
+            content="Session recovered. You can continue."
         ).send()
 
 
@@ -198,7 +223,7 @@ async def _run_deliberation(task: str):
     loop = asyncio.get_running_loop()
 
     def _on_progress(event: str, data: dict):
-        """Called from the graph thread when an agent starts working."""
+        """Called from the graph thread when an agent starts or completes."""
         if event == "agent_start":
             agent = data.get("agent", "")
             phase = data.get("phase", "")
@@ -212,6 +237,10 @@ async def _run_deliberation(task: str):
             text = f"**{label}** [{bar}] {idx}/{total} — {title} is thinking..."
             asyncio.run_coroutine_threadsafe(
                 queue.put(("progress", text)), loop
+            )
+        elif event == "agent_complete":
+            asyncio.run_coroutine_threadsafe(
+                queue.put(("agent_output", data)), loop
             )
 
     def _stream():
@@ -259,6 +288,32 @@ async def _run_deliberation(task: str):
                 await status_msg.update()
             continue
 
+        if tag == "agent_output":
+            # Display agent output immediately as it completes
+            output = payload.get("output", {})
+            phase = payload.get("phase", "")
+
+            # Insert phase header on first output of a new phase
+            is_cross = "_response" in output.get("agent", "")
+            phase_key = f"{current_round}_{phase}"
+            if phase_key != cl.user_session.get("_last_phase_key"):
+                cl.user_session.set("_last_phase_key", phase_key)
+                if is_cross:
+                    await cl.Message(
+                        content="### Cross-Response — Peer Debate"
+                    ).send()
+                else:
+                    await cl.Message(
+                        content=f"### Round {current_round} — Independent Analysis"
+                    ).send()
+
+            await _send_agent_output(output)
+            prev_output_count += 1
+
+            # Fresh status below the output
+            await _new_status("Continuing deliberation...")
+            continue
+
         state = payload
         last_state = state
 
@@ -277,32 +332,6 @@ async def _run_deliberation(task: str):
                     author="CEO",
                 ).send()
             current_round = round_num
-
-        # ── Show new agent outputs ───────────────────────────────────────
-        outputs = state.get("agent_outputs", [])
-        if len(outputs) > prev_output_count:
-            new_outputs = outputs[prev_output_count:]
-
-            # Insert a phase header when we see the first output of a batch
-            first = new_outputs[0]
-            is_cross = "_response" in first.get("agent", "")
-            display_round = current_round
-            if is_cross:
-                await cl.Message(
-                    content="### Cross-Response — Peer Debate"
-                ).send()
-            else:
-                await cl.Message(
-                    content=f"### Round {display_round} — Independent Analysis"
-                ).send()
-
-            for o in new_outputs:
-                await _send_agent_output(o)
-
-            prev_output_count = len(outputs)
-
-            # Send a fresh status message below the outputs
-            await _new_status("Continuing deliberation...")
 
         # ── Show CEO synthesis ───────────────────────────────────────────
         synthesis = state.get("ceo_synthesis", "")
@@ -741,11 +770,18 @@ async def _ceo_chat(message: str):
 
     await msg.update()
 
-    # Save CEO response to chat history
+    # Save CEO response to chat history and SQLite
     full_response = "".join(collected)
     chat_history = cl.user_session.get("chat_history") or []
     chat_history.append({"role": "assistant", "content": full_response})
     cl.user_session.set("chat_history", chat_history)
+
+    # Persist both sides to SQLite
+    company_id = cl.user_session.get("company_id")
+    if company_id:
+        from core.memory.writer import write_chat_message
+        write_chat_message(company_id, "user", message)
+        write_chat_message(company_id, "assistant", full_response)
 
 
 # ── Direct worker dispatch (no deliberation) ────────────────────────────────
@@ -873,6 +909,7 @@ async def _run_workers_direct(message: str):
 
         worker_name = WorkerClass.role.upper()
         prompt = worker.build_prompt(task_text)
+        worker_output = ""
 
         if prompt:
             # Stream the worker's output token by token
@@ -883,10 +920,12 @@ async def _run_workers_direct(message: str):
 
             queue_w: asyncio.Queue = asyncio.Queue()
             loop = asyncio.get_running_loop()
+            collected_tokens = []
 
             def _stream_worker():
                 try:
                     for token in stream_llm(worker.llm, prompt):
+                        collected_tokens.append(token)
                         asyncio.run_coroutine_threadsafe(
                             queue_w.put(token), loop
                         )
@@ -905,6 +944,7 @@ async def _run_workers_direct(message: str):
                 await msg.stream_token(token)
 
             await msg.update()
+            worker_output = "".join(collected_tokens)
         else:
             # No build_prompt — fall back to non-streaming execute
             await cl.Message(
@@ -917,6 +957,7 @@ async def _run_workers_direct(message: str):
 
             success = result.get("success", False)
             output = result.get("output", "")
+            worker_output = output
 
             if success and output:
                 await cl.Message(content=output, author=worker_name).send()
@@ -929,6 +970,18 @@ async def _run_workers_direct(message: str):
                     content=f"**Failed:** {result.get('summary', 'Unknown error')}",
                     author=worker_name,
                 ).send()
+
+        # Persist worker output to SQLite
+        company_id = cl.user_session.get("company_id")
+        if company_id and worker_output:
+            from core.memory.writer import write_worker_output
+            write_worker_output(company_id, {
+                "worker":  WorkerClass.role,
+                "task":    task_text,
+                "success": True,
+                "summary": f"{WorkerClass.title} output ({len(worker_output)} chars)",
+                "output":  worker_output,
+            })
 
 
 # ── Session cleanup ──────────────────────────────────────────────────────────

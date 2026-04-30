@@ -13,9 +13,6 @@ Currently defined edges:
     human_decision_router  — routes after human response (approve/override/more info)
 """
 
-MAX_DEBATE_ROUNDS = 2
-
-
 def prior_decision_router(state: dict) -> str:
     """
     Called after prior_decision_check.
@@ -43,12 +40,16 @@ def conflict_router(state: dict) -> str:
         "deadlocked" → round1_deliberation  (round 2 with CEO conflict framing)
         "escalate"   → present_recommendation (with escalate_to_human=True)
     """
+    from core.config import get_tunable
+
     debate_round = state.get("debate_round", 1)
+    config = state.get("company_config", {})
+    max_rounds = get_tunable(config, "max_debate_rounds")
 
     if state.get("consensus_reached", False):
         return "resolved"
 
-    if debate_round <= MAX_DEBATE_ROUNDS:
+    if debate_round <= max_rounds:
         return "deadlocked"
 
     return "escalate"

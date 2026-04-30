@@ -32,6 +32,7 @@ DEFAULTS = {
     "worker_max_tokens":      4096,   # max output tokens for non-interactive workers
     "ceo_chat_max_tokens":    2048,   # max output tokens for CEO conversational replies
     "knowledge_max_pct":      50,     # max % of context_length for knowledge.md
+    "max_debate_rounds":      2,      # max deliberation rounds before escalation
 }
 
 

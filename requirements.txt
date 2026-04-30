@@ -11,6 +11,13 @@ chromadb>=0.5.0
 # UI / interaction layer
 chainlit>=1.0.0
 
+# Worker agents
+claude-code-sdk>=0.0.20
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
 # Utilities
 python-dotenv>=1.0.0
 pydantic>=2.0.0

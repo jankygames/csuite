@@ -107,12 +107,35 @@ def _ensure_db_exists(company_id: str) -> None:
                 chroma_id   TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id  TEXT NOT NULL,
+                role        TEXT NOT NULL,
+                content     TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS worker_outputs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id  TEXT NOT NULL,
+                worker      TEXT NOT NULL,
+                task        TEXT NOT NULL,
+                success     INTEGER NOT NULL,
+                summary     TEXT,
+                output      TEXT,
+                created_at  TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_decisions_company
                 ON decisions(company_id, decided_at DESC);
             CREATE INDEX IF NOT EXISTS idx_votes_decision
                 ON agent_votes(decision_id);
             CREATE INDEX IF NOT EXISTS idx_knowledge_company
                 ON knowledge(company_id, category);
+            CREATE INDEX IF NOT EXISTS idx_chat_company
+                ON chat_messages(company_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_worker_company
+                ON worker_outputs(company_id, created_at DESC);
         """)
 
 
@@ -323,3 +346,85 @@ def _build_embed_document(state: dict, agent_outputs: list[dict]) -> str:
         parts.append(f"Human decision: {human}")
 
     return "\n\n".join(parts)
+
+
+# ── Public: chat message persistence ─────────────────────────────────────────
+
+def load_chat_history(company_id: str, limit: int = 20) -> list[dict]:
+    """
+    Load recent chat messages from SQLite for session restoration.
+    Returns list of {role, content} dicts, oldest first.
+    """
+    db = _db_path(company_id)
+    if not db.exists():
+        return []
+    try:
+        _ensure_db_exists(company_id)
+        with sqlite3.connect(str(db)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT role, content FROM chat_messages
+                WHERE company_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (company_id, limit),
+            ).fetchall()
+        # Reverse so oldest is first
+        return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+    except Exception:
+        return []
+
+
+def write_chat_message(company_id: str, role: str, content: str) -> None:
+    """
+    Persist a single chat message (user or CEO) to SQLite.
+    Called by the UI layer during conversational mode.
+    """
+    _ensure_db_exists(company_id)
+    now = datetime.now(timezone.utc).isoformat()
+    db = _db_path(company_id)
+    try:
+        with sqlite3.connect(str(db)) as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_messages (company_id, role, content, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (company_id, role, content, now),
+            )
+    except Exception as e:
+        print(f"[memory] Chat message write error (non-fatal): {e}")
+
+
+# ── Public: worker output persistence ────────────────────────────────────────
+
+def write_worker_output(company_id: str, result: dict) -> None:
+    """
+    Persist a worker's execution result to SQLite.
+    Called by the UI layer after a worker completes.
+    """
+    _ensure_db_exists(company_id)
+    now = datetime.now(timezone.utc).isoformat()
+    db = _db_path(company_id)
+    try:
+        with sqlite3.connect(str(db)) as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_outputs
+                    (company_id, worker, task, success, summary, output, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    company_id,
+                    result.get("worker", "unknown"),
+                    result.get("task", ""),
+                    1 if result.get("success") else 0,
+                    result.get("summary", ""),
+                    result.get("output", "")[:10000],  # cap stored output
+                    now,
+                ),
+            )
+    except Exception as e:
+        print(f"[memory] Worker output write error (non-fatal): {e}")

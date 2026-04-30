@@ -5,12 +5,12 @@ Research Agent (CRA) — a worker that performs analysis and research
 after C-suite approval: competitive analysis, market research, pricing
 studies, technology evaluations, audience analysis, etc.
 
-Non-interactive. Uses the company's configured LLM to synthesize
-research based on the task briefing, company context, and the model's
-training knowledge.
-
-Future enhancement: integrate web search tools for live data.
+Non-interactive. Performs web searches for live data, then uses the
+company's configured LLM to synthesize findings into a structured report.
 """
+
+import httpx
+import re
 
 from core.agents.base_worker import BaseWorker
 from core.agents.base import build_llm, invoke_llm
@@ -64,8 +64,20 @@ class CRAAgent(BaseWorker):
         )
 
     def execute(self, task: str) -> dict:
+        # Gather web search results for context
+        search_context = self._web_search(task)
+        prompt = self.build_prompt(task)
+        if search_context:
+            prompt += (
+                f"\n\n--- WEB SEARCH RESULTS ---\n"
+                f"The following are real search results gathered for this task. "
+                f"Use them to ground your analysis in current data. Cite sources "
+                f"when referencing specific findings.\n\n"
+                f"{search_context}"
+            )
+
         try:
-            findings = invoke_llm(self.llm, self.build_prompt(task))
+            findings = invoke_llm(self.llm, prompt)
             return {
                 "worker":  self.role,
                 "success": True,
@@ -79,3 +91,47 @@ class CRAAgent(BaseWorker):
                 "summary": f"Research failed: {e}",
                 "output":  "",
             }
+
+    @staticmethod
+    def _web_search(query: str, max_results: int = 8) -> str:
+        """
+        Search DuckDuckGo for relevant results. Returns formatted text
+        with titles, URLs, and snippets. No API key needed.
+        Falls back gracefully if search fails.
+        """
+        try:
+            # Extract key terms from the task for a focused search
+            search_query = " ".join(query.split()[:15])
+
+            resp = httpx.get(
+                "https://html.duckduckgo.com/html/",
+                params={"q": search_query},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+                follow_redirects=True,
+            )
+
+            if resp.status_code != 200:
+                return ""
+
+            html = resp.text
+            results = []
+
+            # Parse results from DuckDuckGo HTML
+            # Each result is in a div with class "result"
+            result_blocks = re.findall(
+                r'<a rel="nofollow" class="result__a" href="([^"]*)"[^>]*>(.*?)</a>'
+                r'.*?<a class="result__snippet"[^>]*>(.*?)</a>',
+                html, re.DOTALL
+            )
+
+            for url, title, snippet in result_blocks[:max_results]:
+                title = re.sub(r'<[^>]+>', '', title).strip()
+                snippet = re.sub(r'<[^>]+>', '', snippet).strip()
+                if title and snippet:
+                    results.append(f"**{title}**\n{url}\n{snippet}\n")
+
+            return "\n".join(results) if results else ""
+
+        except Exception:
+            return ""

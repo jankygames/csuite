@@ -292,6 +292,44 @@ def _build_full_history(company_id: str) -> str:
                     f"{k['added_at'] or 'unknown date'})\n{k['content']}"
                 )
 
+        # Chat conversations (owner directives outside formal deliberation)
+        try:
+            chats = conn.execute("""
+                SELECT role, content, created_at
+                FROM chat_messages
+                ORDER BY created_at ASC
+                LIMIT 100
+            """).fetchall()
+
+            if chats:
+                parts.append("\n---\n\n## Owner Conversations (Chat Mode)\n")
+                for c in chats:
+                    speaker = "Owner" if c["role"] == "user" else "CEO"
+                    parts.append(f"**{speaker}** ({c['created_at'][:10]}): "
+                                 f"{c['content'][:500]}")
+        except Exception:
+            pass  # table may not exist yet in older databases
+
+        # Worker execution history
+        try:
+            workers = conn.execute("""
+                SELECT worker, task, success, summary, created_at
+                FROM worker_outputs
+                ORDER BY created_at ASC
+                LIMIT 50
+            """).fetchall()
+
+            if workers:
+                parts.append("\n---\n\n## Worker Execution History\n")
+                for w in workers:
+                    status = "completed" if w["success"] else "failed"
+                    parts.append(
+                        f"**{w['worker'].upper()}** ({w['created_at'][:10]}, "
+                        f"{status}): {w['summary'][:300]}"
+                    )
+        except Exception:
+            pass  # table may not exist yet in older databases
+
     if not parts:
         return "No history available — this is a new company with no prior decisions."
 

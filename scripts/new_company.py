@@ -198,12 +198,35 @@ def scaffold_company(company_id: str, company_name: str, industry: str) -> None:
                 chroma_id   TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id  TEXT NOT NULL,
+                role        TEXT NOT NULL,
+                content     TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS worker_outputs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id  TEXT NOT NULL,
+                worker      TEXT NOT NULL,
+                task        TEXT NOT NULL,
+                success     INTEGER NOT NULL,
+                summary     TEXT,
+                output      TEXT,
+                created_at  TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_decisions_company
                 ON decisions(company_id, decided_at DESC);
             CREATE INDEX IF NOT EXISTS idx_votes_decision
                 ON agent_votes(decision_id);
             CREATE INDEX IF NOT EXISTS idx_knowledge_company
                 ON knowledge(company_id, category);
+            CREATE INDEX IF NOT EXISTS idx_chat_company
+                ON chat_messages(company_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_worker_company
+                ON worker_outputs(company_id, created_at DESC);
         """)
     print(f"  Created: {db_path}")
 

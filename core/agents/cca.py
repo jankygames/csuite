@@ -67,6 +67,27 @@ class CCAAgent(BaseWorker):
     def _build_options(self, resume: str | None = None):
         from claude_code_sdk import ClaudeCodeOptions
         from core.config import get_tunable
+
+        provider = self.config.get("model_provider", "ollama").lower()
+
+        # Build environment variables based on model provider
+        if provider == "ollama":
+            env = {
+                "ANTHROPIC_AUTH_TOKEN": "ollama",
+                "ANTHROPIC_API_KEY": "",
+                "ANTHROPIC_BASE_URL": "http://localhost:11434",
+                "OLLAMA_CONTEXT_LENGTH": str(
+                    self.config.get("context_length", 65536)
+                ),
+            }
+        else:
+            # Anthropic — use real API key from environment
+            import os
+            env = {}
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if api_key:
+                env["ANTHROPIC_API_KEY"] = api_key
+
         opts = ClaudeCodeOptions(
             model=self.model,
             cwd=str(self.codebase_path),
@@ -81,12 +102,7 @@ class CCAAgent(BaseWorker):
                 f"the structure, then make the changes described in the task. "
                 f"When done, summarize what you built and what files you changed."
             ),
-            env={
-                "ANTHROPIC_AUTH_TOKEN": "ollama",
-                "ANTHROPIC_API_KEY": "",
-                "ANTHROPIC_BASE_URL": "http://localhost:11434",
-                "OLLAMA_CONTEXT_LENGTH": "65536",
-            },
+            env=env,
         )
         if resume:
             opts.resume = resume
