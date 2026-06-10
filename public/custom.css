@@ -1,0 +1,178 @@
+/* custom.css — themes Chainlit's chat to match the Owner Dashboard.
+   Ported from the dashboard's tokens. Chainlit owns the message DOM, so this
+   restyles its existing elements rather than restructuring them.
+
+   Served at /public/custom.css via config.toml:  custom_css = "/public/custom.css"
+   Chainlit's frontend is class-hashed in places; the selectors below target the
+   stable data-attributes and element roles. If a rule doesn't bite after a
+   Chainlit upgrade, inspect the element and update the selector — the tokens
+   (:root vars) are what matter and stay portable. */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap');
+
+:root {
+  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --serif: "Instrument Serif", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --ink-1: oklch(0.18 0.008 60);
+  --ink-2: oklch(0.38 0.008 60);
+  --ink-3: oklch(0.58 0.008 60);
+  --rule:  oklch(0.88 0.008 80);
+  --surface: oklch(0.995 0.004 80);
+  --surface-2: oklch(0.97 0.006 80);
+  --bg: oklch(0.985 0.005 80);
+}
+
+/* Manual dark mode — applied when:
+     • Chainlit's own theme provider adds class="dark" to <html> (its primary mechanism), or
+     • our custom.js sets data-theme="dark" from localStorage.csuite-theme (legacy/dashboard sync)
+   Both selectors point at the same tokens so the two systems stay in lockstep. */
+:root[data-theme="dark"],
+html.dark {
+  --ink-1: oklch(0.96 0.006 80);
+  --ink-2: oklch(0.78 0.006 80);
+  --ink-3: oklch(0.60 0.006 80);
+  --rule:  oklch(0.32 0.010 80);
+  --surface: oklch(0.20 0.008 80);
+  --surface-2: oklch(0.23 0.009 80);
+  --bg: oklch(0.16 0.008 80);
+}
+
+/* OS-level dark preference — applies unless the user has explicitly chosen
+   light. Chainlit also respects this, so the two systems agree by default. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not(.light) {
+    --ink-1: oklch(0.96 0.006 80);
+    --ink-2: oklch(0.78 0.006 80);
+    --ink-3: oklch(0.60 0.006 80);
+    --rule:  oklch(0.32 0.010 80);
+    --surface: oklch(0.20 0.008 80);
+    --surface-2: oklch(0.23 0.009 80);
+    --bg: oklch(0.16 0.008 80);
+  }
+}
+
+/* Base type — !important needed because Chainlit's own stylesheet ships
+   hard-coded backgrounds on html/body. */
+html, body {
+  font-family: var(--sans) !important;
+  background: var(--bg) !important;
+  color: var(--ink-1) !important;
+  /* color-scheme tells the browser to use dark scrollbars / form controls /
+     etc. when we're in dark mode, matching the page palette. */
+  color-scheme: light dark;
+}
+
+/* Chainlit's internal panels, message containers, and sidebars use their
+   own backgrounds (white/light gray in their stylesheet). Override the
+   generic ones; the message text-color overrides further down handle the rest. */
+[data-step], .step,
+.message-content,
+main, main > div,
+[role="main"], [role="main"] > div,
+.MuiPaper-root, .MuiCard-root, .MuiBox-root,
+[class*="ChatHeader"], [class*="ChatList"], [class*="ChatInput"],
+[class*="Sidebar"], [class*="Drawer"] {
+  background-color: var(--bg) !important;
+  color: var(--ink-1) !important;
+}
+
+/* Cards / message bubbles should be one step lighter (or darker, in dark mode)
+   than the page so they have a subtle edge. */
+.message-content,
+[data-step]:not(:has([data-step])),
+[class*="MessageContainer"] {
+  background-color: var(--surface) !important;
+}
+
+/* Message author chip → mono label, like the dashboard */
+.message-author, [data-step-type] .name, .step .name {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: var(--ink-2) !important;
+}
+
+/* In-message headings (### Role — Title, phase headers) */
+.message-content h3, [data-step] h3 {
+  font-family: var(--sans) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em !important;
+  color: var(--ink-1) !important;
+  margin-top: 0.4em !important;
+}
+
+/* Company name on session start (## …) → serif display moment */
+.message-content h2, [data-step] h2 {
+  font-family: var(--serif) !important;
+  font-weight: 400 !important;
+  font-size: 40px !important;
+  line-height: 1.05 !important;
+  letter-spacing: -0.015em !important;
+  color: var(--ink-1) !important;
+}
+
+/* Body copy width + rhythm */
+.message-content p, [data-step] p {
+  font-size: 15px !important;
+  line-height: 1.6 !important;
+  color: var(--ink-1) !important;
+  max-width: 64ch;
+}
+
+/* Inline code / tool surfaces (CCA tool_use) */
+.message-content code, [data-step] code {
+  font-family: var(--mono) !important;
+  font-size: 12px !important;
+  background: var(--surface-2) !important;
+  border: 1px solid var(--rule) !important;
+  border-radius: 2px !important;
+  padding: 1px 5px !important;
+}
+
+/* Horizontal rule = phase boundary */
+.message-content hr, [data-step] hr {
+  border: none !important;
+  border-top: 1px solid var(--rule) !important;
+  margin: 1.2em 0 !important;
+}
+
+/* ── Status chips (added by custom.js) ─────────────────────────────────────
+   custom.js wraps **PROCEED** etc. in <span class="cs-chip" data-kind="…">. */
+.cs-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding: 3px 8px 2px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  line-height: 1.2;
+  border: 1px solid;
+}
+.cs-chip[data-kind="PROCEED"]  { color: oklch(0.38 0.10 145); background: oklch(0.96 0.04 145); border-color: oklch(0.85 0.07 145); }
+.cs-chip[data-kind="MODIFY"]   { color: oklch(0.40 0.10 70);  background: oklch(0.96 0.05 75);  border-color: oklch(0.85 0.08 70); }
+.cs-chip[data-kind="BLOCK"]    { color: oklch(0.42 0.13 25);  background: oklch(0.96 0.04 25);  border-color: oklch(0.85 0.08 25); }
+.cs-chip[data-kind="ESCALATE"] { color: oklch(0.40 0.13 290); background: oklch(0.96 0.04 290); border-color: oklch(0.85 0.07 290); }
+
+/* ── Monogram avatars (added by custom.js) ─────────────────────────────────
+   custom.js stamps a .cs-avatar before each agent message's author label. */
+.cs-avatar {
+  width: 26px; height: 26px;
+  border-radius: 2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-right: 8px;
+  border: 1px solid;
+  vertical-align: middle;
+}
+.cs-avatar[data-role="CEO"] { background: oklch(0.96 0.02 270); border-color: oklch(0.85 0.04 270); color: oklch(0.35 0.07 270); }
+.cs-avatar[data-role="CFO"] { background: oklch(0.96 0.02 145); border-color: oklch(0.85 0.04 145); color: oklch(0.35 0.07 145); }
+.cs-avatar[data-role="COO"] { background: oklch(0.96 0.02 60);  border-color: oklch(0.85 0.04 60);  color: oklch(0.35 0.07 60); }
+.cs-avatar[data-role="CMO"] { background: oklch(0.96 0.02 350); border-color: oklch(0.85 0.04 350); color: oklch(0.35 0.07 350); }
+.cs-avatar[data-role="CTO"] { background: oklch(0.96 0.02 220); border-color: oklch(0.85 0.04 220); color: oklch(0.35 0.07 220); }
+.cs-avatar[data-role="CCA"] { background: oklch(0.96 0.02 200); border-color: oklch(0.85 0.04 200); color: oklch(0.35 0.07 200); }

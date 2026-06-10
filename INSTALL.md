@@ -235,15 +235,25 @@ See the `templates/prompts/` directory in the repo for the starter format.
 {VENV}\Scripts\Activate.ps1
 
 cd {PROJECT}
-chainlit run app.py
+uvicorn server:app --port 8000
 ```
 
-Open your browser to `http://localhost:8000`.
+`server.py` is a parent FastAPI app that serves the Owner Dashboard at `/`
+and mounts the Chainlit chat at `/chat`. Open your browser to
+`http://localhost:8000/`.
 
-1. Select your company from the list
-2. Start chatting — the CEO responds conversationally
-3. Say "should we..." to trigger a full C-suite deliberation
-4. Say "draft...", "build...", "research..." to dispatch workers
+1. **Dashboard** — pick your company from the card grid
+2. Click the card → you land in `/chat` with that company already loaded
+3. Start chatting — the CEO responds conversationally
+4. Say "should we..." to trigger a full C-suite deliberation
+5. Say "draft...", "build...", "research..." to dispatch workers
+6. Use the top nav (`Companies` / `Memory` / `Settings`) to switch surfaces.
+   Memory is a read-only browse of `knowledge.md` + decision log; Settings
+   is an editable view of the company's `config.json`.
+
+**Legacy entry point:** `chainlit run app.py` still works for chat-only
+use — but it skips the dashboard and shows the in-chat company picker
+instead. `uvicorn server:app --port 8000` is the recommended command.
 
 ---
 
@@ -277,12 +287,18 @@ ollama list
 nvidia-smi
 # Expected: GPU listed with driver info
 
-# 4. Check imports
+# 4. Check core imports
 cd {PROJECT}
 python -c "from core.graph.session_graph import build_session_graph; print('OK')"
 # Expected: OK
 
-# 5. Check Claude Code CLI (optional)
+# 5. Check the server (dashboard + chat host) imports
+python -c "import server; print('OK')"
+# Expected: OK
+# A failure here usually means missing FastAPI/uvicorn/chainlit — re-run:
+#   pip install -r requirements.txt
+
+# 6. Check Claude Code CLI (optional)
 claude --version
 # Expected: version number
 ```

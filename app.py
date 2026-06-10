@@ -18,6 +18,7 @@ Flow:
 
 import asyncio
 import json
+import pathlib
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -28,12 +29,74 @@ from core.config import COMPANY_ROOT, get_tunable
 from core.graph.session_graph import build_session_graph
 from core.graph.nodes import set_progress_callback
 
+# server.py's /enter/<id> writes the picked company here as a fallback for
+# clients that arrive at /chat/ without a ?company=<id> URL parameter.
+PENDING_FILE = pathlib.Path(__file__).parent / ".session" / "pending_company.json"
+
+
+def _company_exists(company_id: str) -> bool:
+    """Reject URL-tampered or stale ids before loading a session."""
+    return bool(
+        company_id
+        and (COMPANY_ROOT / company_id / "config.json").exists()
+    )
+
+
+def _pick_from_url() -> str | None:
+    """Read ?company=<id> from the page URL that opened this Chainlit session.
+
+    Chainlit exposes the websocket connect's WSGI environ via
+    context.session.environ; the page URL (with query string) arrives as
+    HTTP_REFERER. This is the same mechanism Chainlit itself uses to read
+    HTTP_ACCEPT_LANGUAGE for the user's locale. Reading from the URL is the
+    primary handoff path now — it carries one company per tab so multiple
+    chats can run in parallel without racing on a shared pending file.
+    """
+    try:
+        from chainlit.context import context
+        from urllib.parse import urlparse, parse_qs
+        env = getattr(context.session, "environ", None) or {}
+        referer = env.get("HTTP_REFERER", "")
+        if not referer:
+            return None
+        return (parse_qs(urlparse(referer).query).get("company") or [None])[0]
+    except Exception:
+        # Never block session startup on a URL-parsing miss — fall through to
+        # the pending-file or in-chat picker paths below.
+        return None
+
 
 # ── Startup: company selection ───────────────────────────────────────────────
 
 @cl.on_chat_start
 async def start():
-    """List available companies and let the user pick one."""
+    """Honor a dashboard selection; otherwise show the in-chat picker."""
+
+    # 1. URL param (primary): each card opens in a new tab carrying its own
+    #    ?company=<id>, so opening N tabs to N companies works race-free.
+    picked = _pick_from_url()
+    if picked and _company_exists(picked):
+        # Drain any leftover pending file too — /enter writes both as a
+        # belt-and-suspenders, and we don't want a stale value sitting around
+        # to confuse a later URL-less visit.
+        PENDING_FILE.unlink(missing_ok=True)
+        await _load_company(picked)
+        return
+
+    # 2. Pending file (fallback): if the owner arrived at /chat/ without a
+    #    ?company= param (e.g. they typed the URL directly or followed a
+    #    bookmark to /enter/<id> on an older client), consume the file.
+    if PENDING_FILE.exists():
+        try:
+            picked = json.loads(PENDING_FILE.read_text(encoding="utf-8")).get("company_id")
+            PENDING_FILE.unlink(missing_ok=True)
+            if picked:
+                await _load_company(picked)
+                return
+        except Exception:
+            PENDING_FILE.unlink(missing_ok=True)
+            # fall through to the picker below
+
     companies = _list_companies()
 
     if not companies:

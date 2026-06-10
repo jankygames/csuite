@@ -22,10 +22,11 @@ inference, Anthropic API as an option) configurable per company.
 7. [Hardware Requirements](#hardware-requirements)
 8. [Installation](#installation)
 9. [Creating a Company](#creating-a-company)
-10. [Running a Session](#running-a-session)
-11. [Configuration Reference](#configuration-reference)
-12. [Design Decisions](#design-decisions)
-13. [What's Next](#whats-next)
+10. [Owner Dashboard](#owner-dashboard)
+11. [Running a Session](#running-a-session)
+12. [Configuration Reference](#configuration-reference)
+13. [Design Decisions](#design-decisions)
+14. [What's Next](#whats-next)
 
 ---
 
@@ -361,7 +362,18 @@ The graph picks up new agents automatically — no graph or node changes needed.
 ```
 D:\csuite\
 │
-├── app.py                          ← Chainlit web UI entry point
+├── server.py                       ← Parent FastAPI app — entry point
+├── app.py                          ← Chainlit chat app (mounted at /chat)
+│
+├── public\
+│   ├── custom.css                  ← Chainlit chat theme (matches dashboard tokens)
+│   ├── custom.js                   ← Status chips + monogram avatars in chat
+│   └── dashboard\                  ← React SPA: companies / memory / settings
+│       ├── index.html              ← Owner dashboard at /
+│       ├── memory.html             ← Memory browser at /memory.html
+│       ├── settings.html           ← Settings editor at /settings.html
+│       ├── styles.css              ← Design tokens (OKLCH palette, font stack)
+│       └── *.jsx, *.css            ← In-browser React (Babel standalone)
 │
 ├── core\
 │   ├── config.py                   ← Centralised path config (env vars)
@@ -412,8 +424,11 @@ D:\csuite\
 │   └── run_indexer.py              ← Manual knowledge indexer CLI
 │
 ├── requirements.txt
+├── .chainlit\config.toml            ← Chainlit settings (loads custom.css/js)
 ├── .gitignore
-└── README.md
+├── README.md
+├── INSTALL.md                       ← step-by-step setup guide
+└── DESIGN.md                        ← design system reference
 
 D:\models\ollama\                   ← Ollama model cache (set via OLLAMA_MODELS env var)
 E:\venvs\csuite\                    ← Python virtual environment
@@ -533,20 +548,71 @@ This creates:
 
 ---
 
+## Owner Dashboard
+
+Beyond the chat, the system ships with a multi-company web dashboard. It's
+served by a parent FastAPI app ([server.py](server.py)) that mounts the
+Chainlit chat at `/chat`. One process, one origin, four surfaces:
+
+```
+http://localhost:8000/
+├── /                  Companies dashboard — card grid; pick a company to enter
+├── /memory.html       Institutional memory browser (per company)
+├── /settings.html     Editable config.json + tunables (per company)
+├── /chat              Chainlit deliberation UI (your existing app.py, mounted)
+└── /api/...           JSON endpoints behind the three pages
+```
+
+**Companies dashboard** (`/`) — card grid of every company under
+`CSUITE_COMPANY_ROOT`. Each card shows mission, stage, sector, strategic
+priorities, and live status. Clicking a card → `/enter/<id>` → records the
+pick in `.session/pending_company.json` → 303 → `/chat`, where the chat
+auto-loads that company (no in-chat picker needed).
+
+**Memory browser** (`/memory.html?company=<id>`) — read-only view over a
+company's institutional memory:
+- Distilled `knowledge.md` (rendered with a small bespoke markdown renderer)
+- Full decision log with per-agent votes, confidence, concerns, and
+  owner overrides flagged
+- Re-index button (`POST /api/reindex/<id>`) that forces a fresh
+  knowledge.md distillation
+- Sidebar: decision / session / escalation / override counts, plus
+  index-drift stats
+
+**Settings editor** (`/settings.html?company=<id>`) — editable view of
+`config.json`. Save issues `PUT /api/settings/<id>`, which merges only a
+whitelist of keys (`_EDITABLE_KEYS ∪ _TUNABLE_KEYS` in server.py) back
+onto the existing file — unrelated keys like `model_name`, `context_length`,
+or API keys are never touched.
+
+**Chat theme** — `.chainlit/config.toml` loads `public/custom.css` (ports
+the dashboard's OKLCH palette and font stack onto Chainlit's message DOM)
+and `public/custom.js` (adds status chips on `**PROCEED/MODIFY/BLOCK/ESCALATE**`
+and per-role monogram avatars). See [DESIGN.md](DESIGN.md) for the full
+design system reference.
+
+**Optional:** `companies/<id>/state.json` is read by the dashboard to show
+live card status (Idle / Deliberating / Pending). Without it every card
+shows "Idle" — an honest default. To light cards up, write to that file
+from `app.py` when a session changes phase.
+
+---
+
 ## Running a Session
 
-### Web UI (Chainlit) — recommended
+### Web UI — recommended
 
 ```powershell
 # Activate the virtual environment first
 E:\venvs\csuite\Scripts\Activate.ps1
 
 cd D:\csuite
-chainlit run app.py
+uvicorn server:app --port 8000
 ```
 
-This opens a web interface at `http://localhost:8000`. After selecting a
-company, you can interact in three modes:
+Open `http://localhost:8000/` — the **owner dashboard**. Click a company
+card and you land in its deliberation session at `/chat`. From there you
+can interact in three modes:
 
 **Chat mode** (default) — talk naturally with the CEO:
 - "What did we decide about the dice roller?"
@@ -688,12 +754,21 @@ The foundation is complete. Planned additions in order:
 ### Near-term
 
 1. ~~**Chainlit UI**~~ — **done** (`app.py`)
-2. **Live end-to-end test** — first real deliberation session through the UI
-3. **Per-agent streaming in UI** — break deliberation nodes into individual
+2. ~~**Owner Dashboard**~~ — **done** (`server.py` + `public/dashboard/`,
+   mounts Chainlit at `/chat`)
+3. ~~**Memory browser**~~ — **done** (`/memory.html` reads `knowledge.md`
+   + SQLite decisions/votes/sessions; force-reindex from UI)
+4. ~~**Settings editor**~~ — **done** (`/settings.html` edits whitelisted
+   `config.json` keys + engine tunables)
+5. **Live end-to-end test** — first real deliberation session through the UI
+6. **Per-agent streaming in UI** — break deliberation nodes into individual
    agent nodes so the UI shows each agent's output the moment it finishes,
    not after the whole round completes
-4. **Task context input in UI** — let users provide background context
+7. **Task context input in UI** — let users provide background context
    alongside the task (the CLI `--context` flag has no UI equivalent yet)
+8. **Live card status** — wire `companies/<id>/state.json` writes into
+   `app.py` so dashboard cards reflect Idle / Deliberating / Pending in
+   real time (the dashboard already reads the file; the writer is the gap)
 
 ### Medium-term
 
@@ -721,8 +796,8 @@ The foundation is complete. Planned additions in order:
 11. **Decision audit trail** — exportable history of all decisions, agent
     reasoning, and human overrides for a company, useful for retrospectives
     or onboarding a co-founder/partner into the system
-12. **Multi-company dashboard** — a view across all company instances showing
-    recent decisions, pending escalations, and session summaries
+12. ~~**Multi-company dashboard**~~ — **done** (`/` shows every company under
+    `CSUITE_COMPANY_ROOT` as a card with status + last session + decisions/quarter)
 13. **Agent personality tuning from feedback** — automatically adjust agent
     personality prompts based on accumulated human override data (e.g. if
     you consistently override the CFO's conservative blocks, nudge its

@@ -5,20 +5,30 @@ it actually exists in the repository today. It is descriptive first
 (documenting what is already in the code) and prescriptive only where the
 existing conventions imply a clear rule.
 
-**Important context up front:** this is a Python/LangGraph backend with a
-Chainlit chat UI and a CLI runner. There is no custom HTML, CSS, JS, or asset
-pipeline in the repository. There is no logo, brand palette, or icon set.
-"Design," in this codebase, governs four things:
+**Important context up front:** this is a Python/LangGraph backend with two
+rendering surfaces — a Chainlit chat at `/chat` and a React owner dashboard
+at `/`, both served by a parent FastAPI app ([server.py](server.py)). A
+legacy CLI runner ([core/graph/runner.py](core/graph/runner.py)) also exists.
 
-1. The **structure of agent output** (JSON envelope + free-form analysis).
+The design system has six load-bearing pieces:
+
+1. The **structure of agent output** (JSON envelope + free-form analysis) —
+   constrains what every visual surface can ever display.
 2. The **rhythm and hierarchy of messages** rendered into Chainlit and the CLI.
 3. The **voice and behavioral style** of each agent, defined in markdown
    prompt files.
 4. The **terminology** the system uses to describe its own workflow
    (chat / deliberate / implement, round 1 / cross-response, etc.).
+5. The **dashboard token system** in [public/dashboard/styles.css](public/dashboard/styles.css)
+   `:root` — OKLCH palette, font stack (Instrument Serif / IBM Plex Sans /
+   JetBrains Mono), spacing scale. Reuse the variables; never hard-code values.
+6. The **chat-side enhancements** in [public/custom.css](public/custom.css) and
+   [public/custom.js](public/custom.js) — port the dashboard tokens onto
+   Chainlit's message DOM, wrap status words in colored chips, and stamp
+   per-role monogram avatars.
 
-Anything below labeled *gap* or *not defined* is an honest acknowledgement
-that no convention currently exists.
+Anything below labeled *gap* is an honest acknowledgement that no convention
+currently exists.
 
 ---
 
@@ -26,88 +36,194 @@ that no convention currently exists.
 
 ### 1.1 Rendering surfaces
 
-The system has two output surfaces. Both consume the same underlying agent
+The system has three output surfaces. They consume the same underlying agent
 outputs but format them differently.
 
 | Surface | Driver | File | Audience |
 |---|---|---|---|
-| Chainlit web UI | `cl.Message`, markdown | [app.py](app.py) | Primary — the human owner |
+| Owner dashboard | React (Babel standalone) | [public/dashboard/](public/dashboard/) | Primary — companies list, memory browser, settings editor |
+| Chainlit chat | `cl.Message`, markdown | [app.py](app.py) | Primary — the deliberation conversation |
 | Terminal report | Plain-text ASCII frame | [core/agents/ceo.py](core/agents/ceo.py) — `format_presentation` | CLI runner (legacy / fallback) |
 
-The Chainlit UI is the primary interface; the CLI runner exists for
-scripting and was the original entry point.
+The dashboard is the front door (mounted at `/`); Chainlit is mounted at
+`/chat`. A click on a dashboard card writes `.session/pending_company.json`
+and 303-redirects to `/chat`, where the chat auto-loads that company.
 
 ### 1.2 Chainlit configuration
 
-The Chainlit UI runs at its defaults. See [.chainlit/config.toml](.chainlit/config.toml).
+See [.chainlit/config.toml](.chainlit/config.toml).
 
 - `name = "Assistant"` — no branded assistant name yet (*gap*)
 - `default_theme` — not set; relies on Chainlit's default (light + dark)
 - `layout` — not set; Chainlit default centered column
-- `custom_css` — not set (*gap* — no brand stylesheet)
-- `custom_js` — not set
-- `logo_file_url`, `default_avatar_file_url` — empty (*gap* — no logos or
-  per-agent avatars)
+- `custom_css = "/public/custom.css"` — **set**. Ports the dashboard's
+  OKLCH palette and font stack onto Chainlit's message DOM. See §1.3 / §1.4.
+- `custom_js = "/public/custom.js"` — **set**. Adds two progressive
+  enhancements at runtime: status chips on `**PROCEED/MODIFY/BLOCK/ESCALATE**`
+  and per-role monogram avatars. See §1.5.
+- `logo_file_url`, `default_avatar_file_url` — empty. Monograms in custom.js
+  cover per-agent identity without raster assets (closing the avatar gap).
 - `cot = "full"` — chain-of-thought is shown in full
 - `alert_style = "classic"` — classic-style alerts
 - `user_message_markdown = true` — user input is rendered as markdown
+- `unsafe_allow_html = false` — Python emits markdown only; the chat-side
+  chip and avatar HTML is added by custom.js after Chainlit renders.
 
-There is no `public/` directory and no `custom.css` file in the repo. Any
-visual tightening (typography overrides, palette, agent avatars, custom
-sidebar) is a clean greenfield decision.
+Because Chainlit is mounted at `/chat`, it auto-rewrites the `custom_css` /
+`custom_js` URLs in its own HTML head to `/chat/public/custom.css` and
+`/chat/public/custom.js` — both files are visible to the browser at those
+paths. (Probing `/public/custom.css` from the root will 404; that's not a
+path the chat ever actually requests.)
 
 ### 1.3 Color
 
-**Not defined in the codebase.** Color is inherited from Chainlit's default
-theme.
+Defined as CSS custom properties in [public/dashboard/styles.css](public/dashboard/styles.css)
+`:root` (full palette) and partially mirrored in [public/custom.css](public/custom.css)
+(chat side). **All colors are OKLCH** — perceptually uniform, theme-able by
+overriding a single hue value. **Never hard-code hex.**
 
-There is no palette declared in code, config, or assets. There are no
-status colors (e.g. "block" rendered red, "proceed" rendered green) — every
-status is communicated by **text label only** (`PROCEED`, `BLOCK`, `MODIFY`,
-`ESCALATE`).
+**Warm-neutral light theme (default):**
 
-The CEO's `_apply_escalation_rules` function distinguishes outcomes only by
-keyword, not by any styling layer.
+| Token | Value | Used for |
+|---|---|---|
+| `--bg` | `oklch(0.985 0.005 80)` | Page background, composer |
+| `--surface` | `oklch(0.995 0.004 80)` | Cards, rail, headers |
+| `--surface-2` | `oklch(0.97 0.006 80)` | Worker stream block, code, ref chips |
+| `--rule` | `oklch(0.88 0.008 80)` | Borders, dividers |
+| `--rule-soft` | `oklch(0.93 0.006 80)` | Inner card borders |
+| `--ink-1` | `oklch(0.18 0.008 60)` | Primary text, headings |
+| `--ink-2` | `oklch(0.38 0.008 60)` | Secondary text, agent concerns |
+| `--ink-3` | `oklch(0.58 0.008 60)` | Tertiary text, metadata |
+| `--ink-4` | `oklch(0.72 0.006 60)` | Faintest text, separators |
+| `--accent` | `oklch(0.42 0.10 270)` | Task block border, focus rings, progress bar |
+| `--accent-soft` | `oklch(0.92 0.04 270)` | Focus glow, accent backgrounds |
+
+**Dark theme** — same tokens, inverted lightness, activated by
+`:root[data-theme="dark"]`.
+
+**Accent presets** — `data-accent="indigo|graphite|olive|rust"` swaps a
+single `--accent` value without touching the rest of the palette. The
+attribute is read by the tweaks panel.
+
+**Status colors** — three pairs, applied to status chips by custom.css.
+All OKLCH, tuned at L≈0.40 for the text and L≈0.96 for the chip background:
+
+| Status | Hue | Used at |
+|---|---|---|
+| `PROCEED` | `145` (green) | `.cs-chip[data-kind="PROCEED"]` |
+| `MODIFY` | `70-75` (amber) | `.cs-chip[data-kind="MODIFY"]` |
+| `BLOCK` | `25` (red) | `.cs-chip[data-kind="BLOCK"]` |
+| `ESCALATE` | `290` (violet) | `.cs-chip[data-kind="ESCALATE"]` + `.escalate-banner` |
+
+**Per-role monogram colors** — six pairs, applied to `.cs-avatar` by hue:
+
+| Role | Hue | Tone |
+|---|---|---|
+| CEO | `270` | violet |
+| CFO | `145` | green |
+| COO | `60` | amber |
+| CMO | `350` | rose |
+| CTO | `220` | blue |
+| CCA | `200` | teal |
+
+**Rule for new color:** if you need a new state color, pick a hue at the
+nearest free 30° step on the OKLCH wheel and reuse the L/C values from the
+status table. Don't introduce hex.
+
+**Rule for status-by-color:** color is *augmentation* of the existing text
+labels (`**PROCEED**` etc.), not a replacement for them. The CLI report has
+no color layer and must remain intelligible — every chip's hue is matched
+by a word.
 
 ### 1.4 Typography
 
-**Inherited from Chainlit defaults.** No custom font stack.
+**Three-family stack**, loaded from Google Fonts. Used identically by the
+dashboard and the chat (custom.css imports the same families).
 
-In-message typography is governed entirely by markdown. The conventions in
-use (observed across [app.py](app.py) and [core/agents/ceo.py](core/agents/ceo.py)):
+| Family | Token | Role | Used at |
+|---|---|---|---|
+| **Instrument Serif** | `--serif` | Display, editorial moments | Company name (56px on dashboard, 40px on chat), CEO synthesis text (19px), company mission |
+| **IBM Plex Sans** | `--sans` | Body, UI | Default body (15px / 1.55), agent titles, agent analysis, decision lead |
+| **JetBrains Mono** | `--mono` | Labels, structure, code | Phase headers, progress bars, status chips, monogram avatars, ref chips, author labels |
 
-| Markdown element | Used for |
+**Type scale** (px):
+
+| Size | Used for |
 |---|---|
-| `### Heading` | Phase header within a deliberation (e.g. `### Round 1 — Independent Analysis`, `### CEO Synthesis — Consensus Reached`) |
-| `## Heading` | Company name on session start (`## {company_name}`) |
-| `**bold**` | Recommendation badges, action labels, status words (`**PROCEED**`, `**reset**`, `**approve**`) |
-| `*italic*` | Company mission line on startup, soft emphasis |
-| `` `code` `` | File paths, raw tokens, tool-call surfaces (e.g. CCA `tool_use` messages) |
-| Triple-backtick block | Error tracebacks |
-| `---` horizontal rule | Phase boundaries within a single conversation thread |
-| Bullet `- ` | Concerns, strategic priorities, response option menus |
+| 56 / 42 | Company name (dashboard / compact) |
+| 40 | Company name (chat `## heading`) |
+| 22 | Rail company label |
+| 19 / 17 | Synthesis prose, company mission |
+| 17 | Owner task text |
+| 15 / 14 | Body, agent analysis |
+| 14 | Agent title |
+| 13.5 | Concerns, synthesis reasoning |
+| 12 | Mono labels, progress row, agent recommendation row |
+| 11 | Phase header tracking (`### ROUND 1 — INDEPENDENT ANALYSIS`), priority pills |
+| 10 | Monogram avatars, ref chips |
+
+**Font features:** `font-feature-settings: "ss01", "cv11"` is set on body.
+Don't override unless you know why.
+
+**Letter-spacing convention:** serif display is tightened (`-0.015em` on
+company names); mono labels are loosened (`0.04em` to `0.14em` depending
+on prominence). Sans body stays at `0em`.
+
+**Density modes:** `data-density="compact"` on the root reduces padding
+and several type sizes (e.g. 56→42 on company name). Same tokens, smaller.
+
+**Markdown-to-type mapping** (in Chainlit messages, governed by custom.css):
+
+| Markdown element | Renders as |
+|---|---|
+| `## Heading` | Serif 40px, company name on session start |
+| `### Heading` | Sans 14px / 600 weight, phase / agent block titles |
+| `**bold**` | Default bold — **except** for `PROCEED/MODIFY/BLOCK/ESCALATE`, which custom.js rewrites into `.cs-chip` (see §1.5) |
+| `*italic*` | Default italic, used for the company mission line on startup |
+| `` `code` `` | Mono 12px on `--surface-2`, used for file paths, tool calls |
+| Triple-backtick | Default code block, used for error tracebacks |
+| `---` hr | 1px `--rule` line, 1.2em vertical margin — phase boundary marker |
+| `- ` bullet | Default markdown bullet — agent concerns, response options |
 
 ### 1.5 Iconography
 
-There are no SVG or image icons. The repository communicates status
-purely through three channels:
+No raster assets. No SVG file assets. Identity and status are communicated
+through five channels:
 
-1. **Unicode line-drawing characters**, used in the CLI report and as
+1. **Unicode line-drawing characters** — used in the CLI report and as
    in-message dividers:
    - `=` — major divider (CLI report header / footer)
-   - `─` (U+2500) — section divider (used both in CLI and in CEO synthesis
-     messages as `─ * 70`)
+   - `─` (U+2500) — section divider (CLI and CEO synthesis messages)
    - `•` (U+2022) — bullet for concerns and conflicts
-   - `█` (U+2588) and `░` (U+2591) — progress-bar fill / empty, used for the
-     "Analyzing [██░░] 2/4 — CFO is thinking..." live indicator in
-     [app.py](app.py:233-237)
-2. **Capitalized status words**: `PROCEED`, `BLOCK`, `MODIFY`, `ESCALATE`.
-3. **Author labels** on Chainlit messages: `CEO`, `CCA`, `CFO — Chief
-   Financial Officer`, etc. (see `AGENT_FULL_NAMES` in [app.py:1124](app.py#L1124))
+   - `█` (U+2588) and `░` (U+2591) — progress-bar fill / empty, used for
+     "Analyzing [██░░] 2/4 — CFO is thinking..." in [app.py:233-237](app.py#L233-L237)
+   - `▸` — collapsed disclosure marker (`.past-decisions summary::before`),
+     rotates 90° on `[open]`
 
-There is **no emoji usage** anywhere in agent-facing output. The
-auto-generated `chainlit.md` welcome file contains a few emoji, but it is
-a Chainlit boilerplate file and is the only one. Keep agent-facing
+2. **Capitalized status words** — `PROCEED`, `BLOCK`, `MODIFY`, `ESCALATE`.
+   In the chat these are upgraded by custom.js into colored chips (see §1.5.4).
+
+3. **Author labels** — `CEO`, `CFO — Chief Financial Officer`, etc.
+   (`AGENT_FULL_NAMES` in [app.py:1124](app.py#L1124)). Rendered by
+   custom.css as mono 11px uppercase with 0.08em tracking.
+
+4. **Status chips** (chat side only — added by [public/custom.js](public/custom.js)):
+   custom.js scans for `<strong>PROCEED</strong>` etc. and rewrites them
+   into `<span class="cs-chip" data-kind="PROCEED">`. Color comes from
+   §1.3's status palette. Idempotent (guarded by `data-cs="1"` flag), so
+   re-running is safe — important because Chainlit streams messages in.
+
+5. **Monogram avatars** (chat side only — added by custom.js): a
+   `<span class="cs-avatar" data-role="CFO">CFO</span>` is prepended to
+   each agent's author label. Mono 10px, 26×26px square, OKLCH-tinted by
+   role. The avatar text *is* the role abbreviation — no separate icon set.
+
+   The dashboard has its own equivalent: `.owner-mark` for the owner's
+   task block (28×28px square, mono 10px, `--accent` background, white
+   text reading "OWNER"). Same pattern: text as iconography.
+
+**No emoji** in agent-facing output. The auto-generated `chainlit.md`
+welcome file has some, but it is unused boilerplate. Keep agent-facing
 surfaces emoji-free.
 
 ---
@@ -292,13 +408,66 @@ used at three specific points:
 It is **not** used between every agent's output — agents are separated by
 their `### heading` and the natural break of a new `cl.Message`.
 
+### 2.8 Dashboard layout
+
+The three dashboard pages (`/`, `/memory.html`, `/settings.html`) share
+the same shell. Defined in [public/dashboard/styles.css](public/dashboard/styles.css).
+
+**Shared shell:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  TOPBAR  · brand left · nav center · switcher right     │  ← topbar.jsx
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│       Main column — max-width: var(--col-w) (720px)     │
+│       padding: var(--pad-x) (28px) · centered           │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Tokens that govern layout:**
+
+| Token | Default | Purpose |
+|---|---|---|
+| `--col-w` | `720px` | Max content width on every page |
+| `--rail-w` | `248px` | Session rail width (chat shell variant) |
+| `--pad-x` | `28px` | Horizontal padding (18px in compact mode) |
+| `--pad-y` | `24px` | Vertical padding (14px in compact mode) |
+| `--radius` | `3px` | Card / chip / input corner radius |
+
+**Page-specific bodies** ([public/dashboard/pages.css](public/dashboard/pages.css)):
+
+- **`/` Companies dashboard** — responsive card grid; each card has serif
+  display name, sans mission, mono priority pills, status chip in
+  top-right, deep-link to `/enter/<id>`.
+- **`/memory.html`** — main column = distilled `knowledge.md` (rendered)
+  + decision log (`<details>` rows with vote tables); right rail = 2×2
+  stat grid + index-status card + recent sessions list. Per-company
+  `<select>` switcher in the topbar writes `?company=<id>` via
+  `history.replaceState`.
+- **`/settings.html`** — fieldsets (Identity, Mission & Strategy,
+  Decision-making, Escalation rules, Executive personalities, Engine
+  tunables). Sticky save bar at the bottom; status badge tracks
+  `clean | dirty | saving | saved | error`.
+
+**Responsive cutoff:** the session rail collapses below 920px; the main
+column stays at full width.
+
+**State persistence:** the only persisted client state is the `?company=<id>`
+query param. No localStorage, no cookies, no service worker.
+
 ---
 
 ## 3. Component Patterns
 
-The repeating "components" in this system are conceptual rather than
-visual — they are message structures, not UI widgets. The five
-load-bearing ones:
+Two layers of components:
+
+- **Chat-side patterns** (sections 3.1–3.5) — message structures, not
+  UI widgets. Anything an agent or the system says is wrapped in one of
+  these patterns.
+- **Dashboard-side patterns** (section 3.6) — real UI widgets defined in
+  [public/dashboard/](public/dashboard/) and reused across the three pages.
 
 ### 3.1 Agent output card
 Defined in §2.2. The single most-used pattern. Anything an executive
@@ -326,6 +495,32 @@ different bodies. Both end with an actionable verb list, never a question.
 ### 3.5 Worker output card
 Defined in §2.5. Two flavors: streamed body (CWA-style) and
 status-summary (CCA / fallback).
+
+### 3.6 Dashboard widgets
+
+| Component | Selector | Lives in | Used on |
+|---|---|---|---|
+| Topbar | `.topbar` | [topbar.jsx](public/dashboard/topbar.jsx) | All three pages |
+| Company switcher | `.company-switcher` | [topbar.jsx](public/dashboard/topbar.jsx) | Memory + Settings |
+| Company card | `.company-card` | [components.jsx](public/dashboard/components.jsx) | `/` |
+| Status chip | `.status-chip[data-status=…]` | [components.jsx](public/dashboard/components.jsx) | Cards, decision log |
+| Mono label | `.mono-label` | [components.jsx](public/dashboard/components.jsx) | Field labels, metadata rows |
+| Priority pill | `.priority-pill` | [styles.css:341](public/dashboard/styles.css#L341) | Cards, settings (priorities list) |
+| Vote table | `.vote-table` | [memory-app.jsx](public/dashboard/memory-app.jsx) | Memory decision-log rows |
+| Editable string list | `.string-list-editor` | [settings-app.jsx](public/dashboard/settings-app.jsx) | Settings (priorities, constraints, escalation lists) |
+| Tweaks panel | `.tweaks-panel` | [tweaks-panel.jsx](public/dashboard/tweaks-panel.jsx) | All pages — theme/accent/density toggles |
+| Sticky save bar | `.save-bar[data-status=…]` | [settings-app.jsx](public/dashboard/settings-app.jsx) | Settings only |
+
+**API-with-mock-fallback** is the pattern every page uses for data:
+`fetch('/api/…')` first; on failure fall back to a `window.CSUITE_MOCK_*`
+constant defined in the page's `*-data.jsx` file. This lets each page
+render when opened as a static file or in a preview context. **Live API
+always wins when reachable.**
+
+**Markdown rendering** (Memory page): the distilled `knowledge.md` is
+rendered by a small bespoke renderer (handles `## `, `### ` headings,
+`**bold**`, `*italic*`, `- ` lists, `---`). Not a full markdown library —
+intentionally minimal to keep the in-browser React bundle small.
 
 ---
 
@@ -507,19 +702,25 @@ would read as inconsistent. Never use HTML —
 
 ## 8. Status & Signal
 
-How the system communicates state today (all text-based; no color, no
-icons):
+How the system communicates state. The Python side emits text only; chips
+and avatars are added by custom.js after render. The CLI stays text-only
+end-to-end.
 
-| Signal | Mechanism |
-|---|---|
-| Agent recommendation | Bold uppercase word: `**PROCEED**`, `**BLOCK**`, `**MODIFY**`, `**ESCALATE**` |
-| Confidence | Percentage to 0 decimals after a middle dot: `· 78% confidence` |
-| Consensus vs. conflict | CEO heading suffix: `— Consensus Reached` / `— Conflict Detected` |
-| Progress | Live-updated unicode bar: `[██░░] 2/4 — CFO is thinking...` |
-| Phase | `### Round 1 — Independent Analysis`, `### Cross-Response — Peer Debate`, `### CEO Synthesis — ...`, `### Reconsideration — Independent Analysis` |
-| Worker pass/fail | Heading suffix: `— completed` / `— failed`, plus `**Error:** {message}` body for fails |
-| System state | Bare prose messages: `"Session reset. You can start fresh."`, `"Deliberation in progress. Please wait..."` |
-| Escalation trigger | Prepended block: `**Escalated — your decision is required.**` |
+| Signal | Mechanism (Python emits) | Chat enhancement (custom.js / custom.css) |
+|---|---|---|
+| Agent recommendation | `**PROCEED**` / `**BLOCK**` / `**MODIFY**` / `**ESCALATE**` | Rewritten into `.cs-chip[data-kind=…]` with status hue |
+| Author label | `author="CFO"` on the message | Mono uppercase, prepended with `.cs-avatar[data-role="CFO"]` monogram |
+| Confidence | `· 78% confidence` (middle dot, no decimals) | — |
+| Consensus vs. conflict | Heading suffix: `— Consensus Reached` / `— Conflict Detected` | — |
+| Progress | Live-updated unicode bar: `[██░░] 2/4 — CFO is thinking...` | — |
+| Phase | `### Round 1 — Independent Analysis`, `### Cross-Response — Peer Debate`, `### CEO Synthesis — …`, `### Reconsideration — …` | — |
+| Worker pass/fail | Heading suffix: `— completed` / `— failed`, plus `**Error:** {message}` body for fails | — |
+| System state | Bare prose: `"Session reset. You can start fresh."`, `"Deliberation in progress…"` | — |
+| Escalation trigger | Prepended block: `**Escalated — your decision is required.**` | (dashboard equivalent: `.escalate-banner` in violet hue 290) |
+
+**Invariant:** every chip's hue must be matched by an existing text label.
+If the chat-side enhancement fails to load, the chat still reads correctly
+in plain markdown — chips are augmentation, not replacement.
 
 **Tone for system messages:** short, declarative, no apologies.
 "Session reset." not "I've reset your session for you!" — this matches
@@ -529,33 +730,41 @@ the system's overall voice of competent operator, not assistant.
 
 ## 9. Gaps & Opportunities
 
-Where no convention exists today:
+**Closed since the previous revision** (the dashboard install):
 
-1. **Brand palette.** Nothing in repo. If a palette is introduced, the
-   recommendation is to use *text-as-status* primarily and reserve
-   color for low-frequency emphasis (recommendation badges, error
-   banners), never as the sole signal — the CLI report must stay
-   intelligible.
-2. **Agent avatars.** No images. `default_avatar_file_url` is empty.
-   Each agent already has a stable role string (`cfo`, `cca`, etc.)
-   that could be mapped to an avatar asset.
-3. **Logo.** None. `logo_file_url` is empty.
-4. **Custom CSS.** None. Chainlit's `custom_css` slot is available but
-   no `public/` directory exists.
-5. **Dashboard / multi-company surface.** Marked unbuilt in CLAUDE.md.
-   No layout exists yet.
-6. **Status colors.** Recommendation values render in plain bold today.
-   If introduced, they should match: proceed = positive, modify =
-   neutral attention, block = negative, escalate = high-attention but
-   distinct from block.
-7. **Per-agent visual identity.** Each agent has voice and a role label
-   but no visual treatment beyond the author chip Chainlit provides.
+- ~~Brand palette~~ — OKLCH palette in [public/dashboard/styles.css](public/dashboard/styles.css) `:root`, mirrored in [public/custom.css](public/custom.css).
+- ~~Status colors~~ — green/amber/red/violet chips for PROCEED/MODIFY/BLOCK/ESCALATE, applied via custom.js.
+- ~~Per-agent visual identity~~ — monogram avatars per role, hue-tinted, applied via custom.js.
+- ~~Custom CSS~~ — `public/custom.css` themes Chainlit's chat to match the dashboard.
+- ~~Dashboard / multi-company surface~~ — `/` lists every company under `CSUITE_COMPANY_ROOT` as a card, with status, mission, priorities, and a deep-link into its chat session.
 
-When extending the system, the recommended order is: lock typography
-and palette first, then introduce per-agent avatars (they are the
-highest-bang-for-buck visual), then build out the dashboard. Don't
-introduce color-as-status without keeping the existing text labels — the
-CLI report must remain the source of truth.
+**Still open:**
+
+1. **Logo / wordmark.** `logo_file_url` is empty in Chainlit config; the
+   dashboard topbar uses a text mark. Neither is wrong, but there's no
+   shared brand mark across both surfaces. Lowest-effort fix: a single
+   monochrome SVG mounted at `/public/brand/mark.svg`, referenced from
+   both `logo_file_url` and the dashboard topbar.
+2. **Live card status writer.** The dashboard reads
+   `companies/<id>/state.json` for card status (`idle` / `deliberating` /
+   `pending`). The reader is wired up in [server.py:80-116](server.py#L80-L116);
+   the *writer* — app.py emitting state.json on phase transitions — is
+   not. Without it every card shows "Idle." See INTEGRATION-style snippet
+   in [README.md](README.md#owner-dashboard).
+3. **Dashboard dark mode toggle.** Tokens exist (`[data-theme="dark"]`),
+   the tweaks panel can flip the attribute, but there's no persisted
+   user preference yet — flipping refreshes back to light.
+4. **Per-company brand overrides.** Each company has DNA in `config.json`;
+   there's no `accent_hue` or `brand_mark` field that would let the
+   dashboard tint a card to its company's color. Could be added cheaply
+   since the palette is already hue-keyed.
+5. **CCA result rendering.** Worker output for CCA is plain `.worker-stream`;
+   tool calls render as inline code. A more structured rendering (file
+   tree diff, per-tool collapsibles) would scale better for long sessions.
+
+When extending the visual layer, the rule of thumb stays: **augment
+text-as-status, never replace it.** The CLI report has no color layer and
+must remain the source of truth.
 
 ---
 
@@ -564,16 +773,23 @@ CLI report must remain the source of truth.
 For anyone writing new UI strings or agent prompts:
 
 - Use `###` headings inside messages.
-- Recommendations are **bold uppercase**.
-- Confidence is `XX%`, separated from rec by ` · `.
+- Recommendations are **bold uppercase** (`**PROCEED**` etc.) — the chat
+  layer will upgrade them into chips automatically.
+- Confidence is `XX%`, separated from rec by ` · ` (middle dot, not hyphen).
 - Concerns: bulleted with `- `; omit the block entirely if empty.
 - Address the user as "you" in UI, "owner" in prompts.
 - No emoji.
-- No color words ("red flag", "green light") — they imply visuals that
-  don't exist.
+- No color words in *prose* ("red flag", "green light") — even though
+  chips exist, agent text should stand on its own. The chip is
+  augmentation, not the channel.
 - Be specific. "Some risk" / "a while" / "expensive" are the failure
   modes the prompts explicitly call out.
 - One `---` rule between phases; not between every message.
 - System messages: declarative, short, no apology.
+- In CSS, always reuse `:root` tokens (`--ink-1`, `--accent`, etc.) — never
+  hex. New status colors come from the OKLCH wheel at 30° hue steps.
+- In custom.js, every DOM mutation must be idempotent (guard with
+  `data-cs="1"`) because Chainlit streams messages in and the observer
+  re-fires on every chunk.
 
 That is the design system as it stands.
