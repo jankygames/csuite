@@ -10,6 +10,8 @@ Non-interactive. Uses the company's configured LLM to generate
 platform-appropriate content based on the task briefing and brand voice.
 """
 
+from pathlib import Path
+
 from core.agents.base_worker import BaseWorker
 from core.agents.base import build_llm, invoke_llm
 
@@ -65,12 +67,6 @@ class CSAAgent(BaseWorker):
     def execute(self, task: str) -> dict:
         try:
             content = invoke_llm(self.llm, self.build_prompt(task))
-            return {
-                "worker":  self.role,
-                "success": True,
-                "summary": f"Communications drafted ({len(content)} chars)",
-                "output":  content,
-            }
         except Exception as e:
             return {
                 "worker":  self.role,
@@ -78,3 +74,25 @@ class CSAAgent(BaseWorker):
                 "summary": f"Communications generation failed: {e}",
                 "output":  "",
             }
+
+        artifact = ""
+        try:
+            artifact = str(self.write_artifact(task, content))
+        except Exception as e:
+            return {
+                "worker":   self.role,
+                "success":  True,
+                "summary":  f"Communications drafted ({len(content)} chars) "
+                            f"— save failed: {e}",
+                "output":   content,
+                "artifact": "",
+            }
+
+        return {
+            "worker":   self.role,
+            "success":  True,
+            "summary":  f"Communications drafted ({len(content)} chars) "
+                        f"— saved to {Path(artifact).name}",
+            "output":   content,
+            "artifact": artifact,
+        }

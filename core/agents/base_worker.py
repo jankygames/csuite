@@ -29,6 +29,7 @@ To add a new worker:
 """
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 
 class BaseWorker(ABC):
@@ -41,6 +42,34 @@ class BaseWorker(ABC):
     def __init__(self, company_config: dict):
         self.config = company_config
         self.company = company_config.get("company_name", "the company")
+        self.company_id = company_config.get("company_id", "")
+
+    def write_artifact(self, task: str, content: str,
+                       ext: str = "md") -> Path:
+        """Save worker output as a real file under the company's documents
+        directory. Filename is <UTC-stamp>-<slug>.<ext> where the slug is
+        derived from the first ~6 words of the task. Returns the absolute
+        path written. Requires `company_id` to be present in self.config —
+        injected by the app/server when the company is loaded."""
+        from datetime import datetime, timezone
+        import re
+        from core.config import documents_dir
+
+        if not self.company_id:
+            raise ValueError(
+                "write_artifact requires company_id in the worker's config; "
+                "the loader should inject it. See _load_company in app.py."
+            )
+
+        words = (task or "").lower().split()[:6]
+        slug = re.sub(r"[^a-z0-9]+", "-", " ".join(words)).strip("-")[:60]
+        slug = slug or "untitled"
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+        out_dir = documents_dir(self.company_id, self.config)
+        path = out_dir / f"{stamp}-{self.role}-{slug}.{ext}"
+        path.write_text(content, encoding="utf-8")
+        return path
 
     @abstractmethod
     def execute(self, task: str) -> dict:

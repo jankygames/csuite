@@ -9,6 +9,8 @@ Non-interactive. Uses the company's configured LLM to generate content
 based on the task briefing and company DNA.
 """
 
+from pathlib import Path
+
 from core.agents.base_worker import BaseWorker
 from core.agents.base import build_llm, invoke_llm
 
@@ -22,6 +24,9 @@ class CWAAgent(BaseWorker):
         "write", "draft", "blog", "post", "copy", "content",
         "newsletter", "press release", "description", "article",
         "announcement", "documentation", "readme", "guide",
+        # Document-shaped requests that aren't code:
+        "document", "memo", "brief", "plan", "proposal", "spec",
+        "goal", "strategy", "outline", "summary",
     ]
 
     def __init__(self, company_config: dict):
@@ -58,12 +63,6 @@ class CWAAgent(BaseWorker):
     def execute(self, task: str) -> dict:
         try:
             content = invoke_llm(self.llm, self.build_prompt(task))
-            return {
-                "worker":  self.role,
-                "success": True,
-                "summary": f"Content drafted ({len(content)} chars)",
-                "output":  content,
-            }
         except Exception as e:
             return {
                 "worker":  self.role,
@@ -71,3 +70,28 @@ class CWAAgent(BaseWorker):
                 "summary": f"Content generation failed: {e}",
                 "output":  "",
             }
+
+        artifact = ""
+        try:
+            artifact = str(self.write_artifact(task, content))
+        except Exception as e:
+            # Saving failed (path/perm issue, missing company_id). Don't
+            # lose the content — return it in `output` so the caller can
+            # still surface it; just flag the save error in the summary.
+            return {
+                "worker":   self.role,
+                "success":  True,
+                "summary":  f"Content drafted ({len(content)} chars) — "
+                            f"save failed: {e}",
+                "output":   content,
+                "artifact": "",
+            }
+
+        return {
+            "worker":   self.role,
+            "success":  True,
+            "summary":  f"Content drafted ({len(content)} chars) — "
+                        f"saved to {Path(artifact).name}",
+            "output":   content,
+            "artifact": artifact,
+        }

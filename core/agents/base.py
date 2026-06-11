@@ -76,9 +76,13 @@ def build_llm(company_config: dict, temperature: float = 0.7, max_tokens: int = 
         model_name      — override the default model for the chosen provider
         context_length  — context window size for Ollama (default: 32768)
     """
-    provider       = company_config.get("model_provider", "ollama").lower()
-    model_name     = company_config.get("model_name", "")
-    context_length = company_config.get("context_length", DEFAULT_CONTEXT_LENGTH)
+    # `... or default` — not `.get(key, default)` — so that an explicit
+    # null/empty saved by the settings UI (when the user clears the field
+    # to "use the default") still falls back to the runtime default
+    # instead of leaking None into ChatAnthropic / OllamaLLM.
+    provider       = (company_config.get("model_provider") or "ollama").lower()
+    model_name     = company_config.get("model_name") or ""
+    context_length = company_config.get("context_length") or DEFAULT_CONTEXT_LENGTH
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic

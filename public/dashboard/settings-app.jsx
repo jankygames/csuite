@@ -8,6 +8,16 @@ const RISK_OPTIONS = ['conservative', 'moderate', 'aggressive'];
 const PERSONAS = [
   ['ceo', 'CEO'], ['cfo', 'CFO'], ['coo', 'COO'], ['cmo', 'CMO'], ['cto', 'CTO'],
 ];
+// Mirror of the runtime defaults in core/agents/base.py — used as placeholders
+// so the user knows what they'd get if they leave a field blank. NOT used to
+// fill the saved config; blank fields are saved as the empty string so the
+// runtime keeps falling back to its own defaults if the defaults move.
+const MODEL_DEFAULTS = {
+  model_provider: 'ollama',
+  model_name:     'gpt-oss:20b',
+  context_length: 32768,
+};
+const PROVIDER_OPTIONS = ['ollama', 'anthropic'];
 const TUNABLE_LABELS = {
   chat_history_length: 'Chat history length',
   chat_message_cap:    'Chat message cap (chars)',
@@ -216,6 +226,23 @@ function SettingsApp() {
             </fieldset>
 
             <fieldset className="fset">
+              <legend className="fset-legend">Paths</legend>
+              <p className="fset-hint">Where this company's workers read and write on disk. Leave blank to use the defaults.</p>
+              <div className="field-grid cols-1">
+                <Field label="Codebase path" span>
+                  <input type="text" value={draft.codebase_path || ''}
+                         placeholder="Absolute path — required for CCA (e.g. E:\MyCompanySite)"
+                         onChange={e => set('codebase_path', e.target.value)} />
+                </Field>
+                <Field label="Documents path" span>
+                  <input type="text" value={draft.documents_path || ''}
+                         placeholder={`Blank = <COMPANY_ROOT>/${companyId || '<id>'}/documents/`}
+                         onChange={e => set('documents_path', e.target.value)} />
+                </Field>
+              </div>
+            </fieldset>
+
+            <fieldset className="fset">
               <legend className="fset-legend">Mission & strategy</legend>
               <div className="field-grid cols-1">
                 <Field label="Mission" span>
@@ -281,6 +308,30 @@ function SettingsApp() {
                     </Field>
                   );
                 })}
+              </div>
+            </fieldset>
+
+            <fieldset className="fset">
+              <legend className="fset-legend">Model</legend>
+              <p className="fset-hint">Inference backend for every agent. Defaults live in <code>core/agents/base.py</code>. Leave blank to inherit them.</p>
+              <div className="field-grid">
+                <Field label="Provider">
+                  <select value={draft.model_provider || ''}
+                          onChange={e => set('model_provider', e.target.value)}>
+                    <option value="">(default · {MODEL_DEFAULTS.model_provider})</option>
+                    {PROVIDER_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </Field>
+                <Field label="Model name">
+                  <input type="text" value={draft.model_name || ''}
+                         placeholder={`default: ${MODEL_DEFAULTS.model_name}`}
+                         onChange={e => set('model_name', e.target.value)} />
+                </Field>
+                <Field label="Context length">
+                  <input type="number" value={draft.context_length ?? ''}
+                         placeholder={`default: ${MODEL_DEFAULTS.context_length}`}
+                         onChange={e => set('context_length', e.target.value === '' ? null : Number(e.target.value))} />
+                </Field>
               </div>
             </fieldset>
 

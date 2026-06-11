@@ -263,6 +263,10 @@ _EDITABLE_KEYS = {
     "company_name", "industry", "stage", "founded", "team_size", "runway",
     "mission", "strategic_priorities", "constraints",
     "risk_profile", "decision_style", "escalation_rules", "agent_personalities",
+    # Paths the owner picks per company:
+    "codebase_path", "documents_path",
+    # Inference backend per company (defaults live in core/agents/base.py):
+    "model_provider", "model_name", "context_length",
 }
 _TUNABLE_KEYS = set(DEFAULTS.keys())
 

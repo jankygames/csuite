@@ -128,6 +128,11 @@ async def _load_company(company_id: str):
     config_path = COMPANY_ROOT / company_id / "config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
 
+    # Inject company_id into the config dict so workers (which only receive
+    # company_config) can locate per-company state — notably the documents
+    # directory used by write_artifact().
+    config["company_id"] = company_id
+
     cl.user_session.set("company_id", company_id)
     cl.user_session.set("company_config", config)
     cl.user_session.set("phase", "ready")
@@ -928,9 +933,24 @@ async def _run_workers_direct(message: str):
     matched = [W for W in WORKER_AGENTS if _worker_matches(W, match_text)]
 
     if not matched:
-        # No workers match — default to CCA if codebase_path is set,
-        # otherwise treat as chat
-        if config.get("codebase_path"):
+        # No worker keyword matched. Pick a fallback based on the *shape* of
+        # the request rather than blindly defaulting to CCA — the old rule
+        # ("if codebase_path is set, route to CCA") shoved every unmatched
+        # request, including pure document requests, into the code repo.
+        text_lower = match_text.lower()
+        doc_signal = any(w in text_lower for w in (
+            "write", "draft", "document", "memo", "brief", "plan",
+            "proposal", "spec", "goal", "strategy", "outline",
+        ))
+        code_signal = any(w in text_lower for w in (
+            "build", "implement", "deploy", "refactor", "fix",
+            "api", "frontend", "backend", "code", "script",
+        ))
+
+        if doc_signal and not code_signal:
+            from core.agents.cwa import CWAAgent
+            matched = [CWAAgent]
+        elif code_signal and config.get("codebase_path"):
             from core.agents.cca import CCAAgent
             matched = [CCAAgent]
         else:
@@ -1008,8 +1028,27 @@ async def _run_workers_direct(message: str):
 
             await msg.update()
             worker_output = "".join(collected_tokens)
+
+            # Streaming bypassed execute(), so save the artifact ourselves.
+            # write_artifact is sync filesystem work — push to the executor.
+            if worker_output:
+                try:
+                    artifact_path = await asyncio.get_running_loop().run_in_executor(
+                        None, worker.write_artifact, task_text, worker_output
+                    )
+                    await cl.Message(
+                        content=f"_Saved to_ `{artifact_path}`",
+                        author=worker_name,
+                    ).send()
+                except Exception as e:
+                    await cl.Message(
+                        content=f"_Could not save artifact: {e}_",
+                        author=worker_name,
+                    ).send()
         else:
-            # No build_prompt — fall back to non-streaming execute
+            # No build_prompt — fall back to non-streaming execute. execute()
+            # will have already saved the artifact and put its path in
+            # result["artifact"]; surface that to the user if present.
             await cl.Message(
                 content=f"**{WorkerClass.title}** is working...",
             ).send()
@@ -1020,10 +1059,16 @@ async def _run_workers_direct(message: str):
 
             success = result.get("success", False)
             output = result.get("output", "")
+            artifact_path = result.get("artifact", "")
             worker_output = output
 
             if success and output:
                 await cl.Message(content=output, author=worker_name).send()
+                if artifact_path:
+                    await cl.Message(
+                        content=f"_Saved to_ `{artifact_path}`",
+                        author=worker_name,
+                    ).send()
             elif success:
                 await cl.Message(
                     content=result.get("summary", "Done."), author=worker_name

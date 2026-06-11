@@ -12,6 +12,8 @@ company's configured LLM to synthesize findings into a structured report.
 import httpx
 import re
 
+from pathlib import Path
+
 from core.agents.base_worker import BaseWorker
 from core.agents.base import build_llm, invoke_llm
 
@@ -78,12 +80,6 @@ class CRAAgent(BaseWorker):
 
         try:
             findings = invoke_llm(self.llm, prompt)
-            return {
-                "worker":  self.role,
-                "success": True,
-                "summary": f"Research report generated ({len(findings)} chars)",
-                "output":  findings,
-            }
         except Exception as e:
             return {
                 "worker":  self.role,
@@ -91,6 +87,28 @@ class CRAAgent(BaseWorker):
                 "summary": f"Research failed: {e}",
                 "output":  "",
             }
+
+        artifact = ""
+        try:
+            artifact = str(self.write_artifact(task, findings))
+        except Exception as e:
+            return {
+                "worker":   self.role,
+                "success":  True,
+                "summary":  f"Research report generated ({len(findings)} "
+                            f"chars) — save failed: {e}",
+                "output":   findings,
+                "artifact": "",
+            }
+
+        return {
+            "worker":   self.role,
+            "success":  True,
+            "summary":  f"Research report generated ({len(findings)} chars) "
+                        f"— saved to {Path(artifact).name}",
+            "output":   findings,
+            "artifact": artifact,
+        }
 
     @staticmethod
     def _web_search(query: str, max_results: int = 8) -> str:

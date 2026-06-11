@@ -44,6 +44,20 @@ def get_tunable(company_config: dict, key: str):
     return company_config.get(key, DEFAULTS.get(key))
 
 
+def documents_dir(company_id: str, config: dict) -> Path:
+    """Where non-code worker artifacts (research reports, drafts, comms,
+    goal docs, etc.) land. Defaults to <COMPANY_ROOT>/<id>/documents/ so
+    they sit alongside the company's other per-company state (chroma,
+    prompts, knowledge.md) rather than polluting the codebase.
+
+    Override per-company by setting `documents_path` in config.json.
+    Created on first use."""
+    raw = config.get("documents_path") if config else None
+    p = Path(raw) if raw else (COMPANY_ROOT / company_id / "documents")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def load_agent_prompt(company_id: str, role: str, config: dict) -> str:
     """
     Load an agent's personality/behavioral prompt.
