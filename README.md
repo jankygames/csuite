@@ -449,7 +449,9 @@ G:\csuite_data\companies\           ← CSUITE_COMPANY_ROOT — configs + knowle
 │       ├── knowledge.md            ← distilled institutional memory (auto-generated)
 │       ├── index_meta.json         ← indexer state tracking
 │       ├── knowledge_versions\     ← timestamped snapshots
-│       └── chroma\
+│       ├── chroma\                 ← ChromaDB fallback store
+│       └── documents\              ← CWA/CRA/CSA artifacts (write_artifact target;
+│                                     override per-company via documents_path in config.json)
 
 F:\csuite_logs\                     ← CSUITE_LOG_ROOT — Session logs (HDD)
 │   └── <company_id>\sessions\
@@ -582,8 +584,12 @@ company's institutional memory:
 **Settings editor** (`/settings.html?company=<id>`) — editable view of
 `config.json`. Save issues `PUT /api/settings/<id>`, which merges only a
 whitelist of keys (`_EDITABLE_KEYS ∪ _TUNABLE_KEYS` in server.py) back
-onto the existing file — unrelated keys like `model_name`, `context_length`,
-or API keys are never touched.
+onto the existing file. The whitelist covers identity, mission, decision
+rules, agent personalities, **paths** (`codebase_path`, `documents_path`),
+**model config** (`model_provider`, `model_name`, `context_length`), and
+engine tunables. Anything outside that whitelist — most importantly the
+`ANTHROPIC_API_KEY` (which lives in `.env`, not config.json) — is never
+touched.
 
 **Chat theme** — `.chainlit/config.toml` loads `public/custom.css` (ports
 the dashboard's OKLCH palette and font stack onto Chainlit's message DOM)
@@ -689,6 +695,7 @@ python -m core.graph.runner `
 | `index_threshold` | int | Re-index after this many new decisions. Default: 5. |
 | `index_version_days` | int | Save versioned knowledge snapshot every N days. Default: 7. |
 | `codebase_path` | string | Absolute path to the codebase this company manages. Required for CCA worker. |
+| `documents_path` | string | Absolute path where CWA/CRA/CSA write their artifacts. Defaults to `<COMPANY_ROOT>/<id>/documents/`. Auto-created on first write. |
 | `chat_history_length` | int | Max messages kept in conversation history. Default: 20. |
 | `chat_message_cap` | int | Max chars per message included in context. Default: 10000. |
 | `cca_max_turns` | int | Max Claude Code SDK turns per CCA session. Default: 50. |
@@ -708,9 +715,12 @@ on. Multi-instance state isolation (one graph + checkpointer per company)
 also maps cleanly onto the repeatable-company requirement.
 
 **Why sequential agent execution?**  
-The RTX 3090 runs one model at a time. "Parallel" execution would just
-queue anyway. Sequential is honest, simpler to debug, and produces the
-same output.
+The default Ollama backend serves one request at a time on the RTX 3090, so
+"parallel" execution would just queue at the server anyway. Sequential is
+honest, simpler to debug, and produces the same output. Companies that opt
+into `model_provider: "anthropic"` could in principle fan out, but the
+deliberation loop stays sequential to keep state, logging, and reasoning
+order identical across backends.
 
 **Why does the CEO not deliberate?**  
 The CEO is the arbitration layer, not a participant. If the CEO argued a
@@ -769,42 +779,45 @@ The foundation is complete. Planned additions in order:
 8. **Live card status** — wire `companies/<id>/state.json` writes into
    `app.py` so dashboard cards reflect Idle / Deliberating / Pending in
    real time (the dashboard already reads the file; the writer is the gap)
+9. ~~**Non-code worker artifacts on disk**~~ — **done** (CWA/CRA/CSA
+   results land under `documents_path`; dispatcher routes doc-shaped
+   requests to CWA instead of falling through to CCA)
 
 ### Medium-term
 
-5. **Dynamic escalation thresholds** — tie spend-based escalation rules to
+1. **Dynamic escalation thresholds** — tie spend-based escalation rules to
    actual financial data (e.g. "escalate if proposed spend exceeds 10% of
    trailing monthly free cash flow") instead of a static dollar amount.
    Requires a financials data source — see Financial Data Integration below.
-6. **Financial data integration** — add a `financials` table to the per-company
+2. **Financial data integration** — add a `financials` table to the per-company
    SQLite database (cash on hand, monthly revenue, monthly expenses, FCF).
    Agents can query this during deliberation for data-grounded recommendations.
    Could be updated manually, via CSV import, or eventually via accounting
-   API integration (QuickBooks, Wave, etc.)
-7. **Knowledge ingestion pipeline** — load external company documents, market
-   data, and competitor information into the distilled knowledge system
-8. ~~**Worker agent tier**~~ — **done** (CCA + extensible registry)
-9. ~~**Distilled knowledge system**~~ — **done** (Karpathy-style, replaces RAG)
-10. **Multi-task agenda** — handle a queue of tasks in one session rather
+   API integration (QuickBooks, Wave, etc.). Scaffolding exists in
+   `scripts/financials.py` + `core/memory/financials.py`.
+3. **Knowledge ingestion pipeline** — load external company documents, market
+   data, and competitor information into the distilled knowledge system.
+   Scaffolding exists in `scripts/ingest.py` + `core/memory/ingest.py`.
+4. **Multi-task agenda** — handle a queue of tasks in one session rather
    than one task per session
 
 ### Longer-term
 
-10. **Agent memory review** — a tool/dashboard to inspect what the system has
-    learned about your decision-making patterns over time (which agents you
-    agree with most, how often you override, recurring themes in overrides)
-11. **Decision audit trail** — exportable history of all decisions, agent
-    reasoning, and human overrides for a company, useful for retrospectives
-    or onboarding a co-founder/partner into the system
-12. ~~**Multi-company dashboard**~~ — **done** (`/` shows every company under
-    `CSUITE_COMPANY_ROOT` as a card with status + last session + decisions/quarter)
-13. **Agent personality tuning from feedback** — automatically adjust agent
-    personality prompts based on accumulated human override data (e.g. if
-    you consistently override the CFO's conservative blocks, nudge its
-    risk calibration)
-14. **Scheduled sessions** — recurring deliberation sessions triggered on a
-    schedule (e.g. weekly strategy review) with auto-generated agenda items
-    pulled from company knowledge and recent decisions
-15. **External data hooks** — let agents pull live data during deliberation
-    (market data APIs, analytics dashboards, CRM stats) rather than relying
-    only on what's in the prompt or memory
+1. **Agent memory review** — a tool/dashboard to inspect what the system has
+   learned about your decision-making patterns over time (which agents you
+   agree with most, how often you override, recurring themes in overrides).
+   Scaffolding exists in `scripts/audit.py`.
+2. **Decision audit trail** — exportable history of all decisions, agent
+   reasoning, and human overrides for a company, useful for retrospectives
+   or onboarding a co-founder/partner into the system
+3. **Agent personality tuning from feedback** — automatically adjust agent
+   personality prompts based on accumulated human override data (e.g. if
+   you consistently override the CFO's conservative blocks, nudge its
+   risk calibration). Scaffolding exists in `scripts/tune_prompts.py`.
+4. **Scheduled sessions** — recurring deliberation sessions triggered on a
+   schedule (e.g. weekly strategy review) with auto-generated agenda items
+   pulled from company knowledge and recent decisions. Scaffolding exists in
+   `scripts/scheduled_session.py`.
+5. **External data hooks** — let agents pull live data during deliberation
+   (market data APIs, analytics dashboards, CRM stats) rather than relying
+   only on what's in the prompt or memory

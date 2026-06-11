@@ -203,7 +203,12 @@ Open `{COMPANIES}/my_company/config.json` and set:
 - `constraints` — hard limits the agents must respect (list)
 - `risk_profile` — "conservative", "moderate", or "aggressive"
 - `escalation_rules.always_escalate` — topics that always require your approval
-- `codebase_path` — absolute path to your codebase (required for CCA worker, leave empty if not applicable)
+- `codebase_path` — absolute path to your codebase (required for CCA worker; leave empty if not applicable)
+- `documents_path` — *(optional)* where the non-code workers (CWA/CRA/CSA) save their output. Leave blank to default to `{COMPANIES}/my_company/documents/`, auto-created on first write.
+
+You can also edit all of these later through the in-app **Settings** page —
+the paths, the model config (`model_provider` / `model_name` / `context_length`),
+escalation rules, and engine tunables all round-trip through `/api/settings/<id>`.
 
 ### Edit Agent Prompts
 
@@ -348,7 +353,11 @@ run `new_company.py` to create at least one company.
         ├── prompts\        ← agent personality prompts
         ├── knowledge.md    ← distilled memory (auto-generated)
         ├── knowledge_versions\
-        └── chroma\
+        ├── chroma\
+        └── documents\      ← CWA/CRA/CSA artifacts (auto-created on first write)
 
 {LOGS}\                 ← CSUITE_LOG_ROOT — session logs
+
+The `documents\` directory is created on first non-code worker run; you
+don't need to make it manually.
 ```
