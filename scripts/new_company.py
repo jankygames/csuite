@@ -21,22 +21,28 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import COMPANY_ROOT, DATA_ROOT, LOG_ROOT
+from core.config import COMPANY_ROOT, database_path, log_dir
 
 
 def scaffold_company(company_id: str, company_name: str, industry: str) -> None:
     print(f"\n  Scaffolding company: {company_name} ({company_id})\n")
 
     # ── Folder structure ──────────────────────────────────────────────────
-    ssd_path    = COMPANY_ROOT / company_id
-    chroma_path = ssd_path / "chroma"
-    prompt_path = ssd_path / "prompts"
-    data_path   = DATA_ROOT / company_id
-    log_path    = LOG_ROOT / company_id / "sessions"
+    # database_path() and log_dir() resolve through the env-var / collocated
+    # defaults defined in core.config, so this script Just Works on a fresh
+    # single-drive install or on a multi-drive setup with CSUITE_DATA_ROOT /
+    # CSUITE_LOG_ROOT exported.
+    company_path = COMPANY_ROOT / company_id
+    chroma_path  = company_path / "chroma"
+    prompt_path  = company_path / "prompts"
+    db_path      = database_path(company_id)   # auto-creates parent
+    log_path     = log_dir(company_id)         # auto-creates dir
 
-    for path in [ssd_path, chroma_path, prompt_path, data_path, log_path]:
+    for path in [company_path, chroma_path, prompt_path]:
         path.mkdir(parents=True, exist_ok=True)
         print(f"  Created: {path}")
+    print(f"  Created: {db_path.parent}  (database location)")
+    print(f"  Created: {log_path}  (log location)")
 
     # ── config.json ────────────────────────────────────────────────────────
     config = {
@@ -107,7 +113,7 @@ def scaffold_company(company_id: str, company_name: str, industry: str) -> None:
         },
     }
 
-    config_path = ssd_path / "config.json"
+    config_path = company_path / "config.json"
     config_path.write_text(
         json.dumps(config, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -151,7 +157,7 @@ def scaffold_company(company_id: str, company_name: str, industry: str) -> None:
     print(f"  Created: {prompt_path}/*.md (5 agent prompts)")
 
     # ── SQLite database ────────────────────────────────────────────────────
-    db_path = data_path / f"{company_id}.db"
+    # db_path was resolved above by database_path(company_id).
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (

@@ -27,7 +27,7 @@ from core.graph.nodes import (
     spawn_workers,
     memory_write,
 )
-from core.config import DATA_ROOT
+from core.config import database_path
 from core.graph.edges import (
     prior_decision_router,
     conflict_router,
@@ -101,8 +101,7 @@ def build_session_graph(company_id: str):
     )
 
     # ── Checkpointer: per-company SQLite ──────────────────────────────────
-    db_path = DATA_ROOT / company_id / f"{company_id}.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path = database_path(company_id)
     ctx = SqliteSaver.from_conn_string(str(db_path))
     checkpointer = ctx.__enter__()
 

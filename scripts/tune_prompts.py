@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import argparse
-from core.config import COMPANY_ROOT, DATA_ROOT, load_agent_prompt
+from core.config import COMPANY_ROOT, database_path, load_agent_prompt
 from core.agents.base import build_llm, invoke_llm
 
 
@@ -32,7 +32,7 @@ def analyze_overrides(company_id: str) -> dict:
     Analyze which agents are most frequently overridden and why.
     Returns structured analysis per agent.
     """
-    db_path = DATA_ROOT / company_id / f"{company_id}.db"
+    db_path = database_path(company_id)
     if not db_path.exists():
         return {}
 

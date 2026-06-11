@@ -5,17 +5,23 @@ Windows machine with an NVIDIA GPU.
 
 Throughout this guide, replace these placeholders with your actual paths:
 
-| Placeholder | Description | Example |
-|---|---|---|
-| `{PROJECT}` | Drive/path for the project repo | `D:\csuite` |
-| `{MODELS}` | Drive/path for Ollama model cache | `D:\models\ollama` |
-| `{VENV}` | Drive/path for the Python virtual environment | `E:\venvs\csuite` |
-| `{DATA}` | Drive/path for company databases | `G:\csuite_data` |
-| `{COMPANIES}` | Drive/path for company configs + knowledge | `G:\csuite_data\companies` |
-| `{LOGS}` | Drive/path for session logs | `F:\csuite_logs` |
+| Placeholder | Description | Single-drive default | Multi-drive example |
+|---|---|---|---|
+| `{PROJECT}` | Project repo | `C:\Users\<you>\csuite` | `D:\csuite` |
+| `{MODELS}` | Ollama model cache | `C:\Users\<you>\.ollama\models` (Ollama default) | `D:\models\ollama` |
+| `{VENV}` | Python virtual environment | `C:\Users\<you>\.venvs\csuite` | `E:\venvs\csuite` |
+| `{COMPANIES}` | Per-company state (configs, prompts, knowledge, **DB**, **logs**, documents — all collocated) | `C:\Users\<you>\.csuite\companies` (default; no env var needed) | `G:\csuite_data\companies` |
 
-**Tip:** Use SSDs for `{PROJECT}`, `{MODELS}`, and `{VENV}` (fast read/write).
-HDDs are fine for `{DATA}`, `{COMPANIES}`, and `{LOGS}` (sequential writes).
+**Single-drive install:** ignore the multi-drive column. Put everything
+on your C: drive (or whichever drive your home dir lives on). The defaults
+take care of themselves.
+
+**Multi-drive install (optional performance tuning):** use SSDs for
+`{PROJECT}`, `{MODELS}`, `{VENV}` (fast read/write). To put the heavy
+sequential writes (SQLite DBs, session logs) on a separate HDD, set the
+optional `CSUITE_DATA_ROOT` and `CSUITE_LOG_ROOT` env vars — see Step 9.
+Per-company `database_path` / `log_path` overrides in `config.json` win
+over both.
 
 ---
 
@@ -151,22 +157,27 @@ able to dispatch code implementation tasks via the `implement` command.
 
 ---
 
-## Step 9: Set Data Path Environment Variables
+## Step 9: (Optional) Override Data Path Environment Variables
 
-Company data is stored outside the repository. Set these environment
-variables so the system knows where to find and store data:
+**Skip this step on a single-drive install.** The defaults put everything
+under `~/.csuite/companies/<id>/` — configs, SQLite DBs, knowledge, logs,
+documents, all collocated. Nothing to configure.
+
+If you want to override (e.g. put company configs somewhere other than
+your home dir, or split heavy writes onto a separate HDD):
 
 1. Open **System Properties** → **Advanced** → **Environment Variables**
-2. Add these **System variables**:
+2. Add any of these **System variables** — all three are optional:
 
-| Variable | Value | Purpose |
+| Variable | When to set it | What it does |
 |---|---|---|
-| `CSUITE_COMPANY_ROOT` | `{COMPANIES}` | Company configs, prompts, knowledge docs |
-| `CSUITE_DATA_ROOT` | `{DATA}` | SQLite databases |
-| `CSUITE_LOG_ROOT` | `{LOGS}` | Session logs |
+| `CSUITE_COMPANY_ROOT` | You want company configs somewhere other than `~/.csuite/companies` | Changes the discovery directory the dashboard scans. Everything else (DBs, logs, knowledge) collocates here by default. |
+| `CSUITE_DATA_ROOT` | Multi-drive setup: SQLite DBs on a different volume | Global override: DBs land at `<DATA_ROOT>/<id>/<id>.db` instead of collocated. Companies can still override individually via `database_path` in `config.json`. |
+| `CSUITE_LOG_ROOT` | Multi-drive setup: session logs on a different volume | Same shape as `CSUITE_DATA_ROOT`, but for logs. Companies can override via `log_path`. |
 
-All three have defaults in `core/config.py`. You can use any paths you
-like — just make sure they exist or can be created.
+Per-company overrides (`database_path`, `log_path`, `codebase_path`,
+`documents_path`) live in each company's `config.json` and are editable
+in the Settings tab.
 
 **Note:** You may need to restart your terminal or IDE after setting
 environment variables.
@@ -183,12 +194,14 @@ cd {PROJECT}
 python scripts/new_company.py --id my_company --name "My Company" --industry "Your Industry"
 ```
 
-This creates:
+This creates (paths shown for a default single-drive install — DB and
+logs land elsewhere if `CSUITE_DATA_ROOT` / `CSUITE_LOG_ROOT` are set):
+
 - `{COMPANIES}/my_company/config.json` — company configuration
 - `{COMPANIES}/my_company/prompts/*.md` — agent personality prompts
 - `{COMPANIES}/my_company/chroma/` — vector store (starts empty)
-- `{DATA}/my_company/my_company.db` — SQLite database
-- `{LOGS}/my_company/sessions/` — log directory
+- `{COMPANIES}/my_company/my_company.db` — SQLite database (collocated default)
+- `{COMPANIES}/my_company/logs/` — log directory (collocated default)
 
 ---
 
@@ -204,7 +217,9 @@ Open `{COMPANIES}/my_company/config.json` and set:
 - `risk_profile` — "conservative", "moderate", or "aggressive"
 - `escalation_rules.always_escalate` — topics that always require your approval
 - `codebase_path` — absolute path to your codebase (required for CCA worker; leave empty if not applicable)
-- `documents_path` — *(optional)* where the non-code workers (CWA/CRA/CSA) save their output. Leave blank to default to `{COMPANIES}/my_company/documents/`, auto-created on first write.
+- `documents_path` — *(optional)* where the non-code workers save artifacts. Default: `{COMPANIES}/my_company/documents/`.
+- `database_path` — *(optional)* absolute path to this company's SQLite file. Default: collocated under `{COMPANIES}/my_company/` (or under `CSUITE_DATA_ROOT` if that env var is set).
+- `log_path` — *(optional)* absolute path to this company's log directory. Default: collocated under `{COMPANIES}/my_company/` (or under `CSUITE_LOG_ROOT` if that env var is set).
 
 You can also edit all of these later through the in-app **Settings** page —
 the paths, the model config (`model_provider` / `model_name` / `context_length`),
@@ -346,17 +361,20 @@ run `new_company.py` to create at least one company.
 {MODELS}\               ← Ollama model cache (OLLAMA_MODELS env var)
 {VENV}\                 ← Python virtual environment
 
-{DATA}\                 ← CSUITE_DATA_ROOT — SQLite databases
-{COMPANIES}\            ← CSUITE_COMPANY_ROOT — company data
+{COMPANIES}\            ← CSUITE_COMPANY_ROOT — per-company state, all collocated by default
     └── <company_id>\
-        ├── config.json
-        ├── prompts\        ← agent personality prompts
-        ├── knowledge.md    ← distilled memory (auto-generated)
-        ├── knowledge_versions\
-        ├── chroma\
-        └── documents\      ← CWA/CRA/CSA artifacts (auto-created on first write)
+        ├── config.json             ← company DNA
+        ├── prompts\                ← agent personality prompts
+        ├── knowledge.md            ← distilled memory (auto-generated)
+        ├── knowledge_versions\     ← timestamped snapshots
+        ├── chroma\                 ← ChromaDB fallback store
+        ├── documents\              ← CWA/CRA/CSA artifacts (auto-created on first write)
+        ├── <company_id>.db         ← SQLite database (override via database_path)
+        └── logs\                   ← session logs (override via log_path)
 
-{LOGS}\                 ← CSUITE_LOG_ROOT — session logs
+# Optional global overrides — only used if the env vars are set:
+<CSUITE_DATA_ROOT>\<id>\<id>.db     ← if CSUITE_DATA_ROOT is set
+<CSUITE_LOG_ROOT>\<id>\sessions\    ← if CSUITE_LOG_ROOT is set
 
 The `documents\` directory is created on first non-code worker run; you
 don't need to make it manually.

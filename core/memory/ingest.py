@@ -25,8 +25,6 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.config import DATA_ROOT
-
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".csv", ".pdf"}
 

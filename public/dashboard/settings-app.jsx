@@ -227,7 +227,7 @@ function SettingsApp() {
 
             <fieldset className="fset">
               <legend className="fset-legend">Paths</legend>
-              <p className="fset-hint">Where this company's workers read and write on disk. Leave blank to use the defaults.</p>
+              <p className="fset-hint">Where this company's workers read and write on disk. Leave blank to use the defaults — they collocate everything under <code>&lt;COMPANY_ROOT&gt;/{companyId || '<id>'}/</code>.</p>
               <div className="field-grid cols-1">
                 <Field label="Codebase path" span>
                   <input type="text" value={draft.codebase_path || ''}
@@ -238,6 +238,16 @@ function SettingsApp() {
                   <input type="text" value={draft.documents_path || ''}
                          placeholder={`Blank = <COMPANY_ROOT>/${companyId || '<id>'}/documents/`}
                          onChange={e => set('documents_path', e.target.value)} />
+                </Field>
+                <Field label="Database path" span>
+                  <input type="text" value={draft.database_path || ''}
+                         placeholder={`Blank = <COMPANY_ROOT>/${companyId || '<id>'}/${companyId || '<id>'}.db (or CSUITE_DATA_ROOT if set)`}
+                         onChange={e => set('database_path', e.target.value)} />
+                </Field>
+                <Field label="Log path" span>
+                  <input type="text" value={draft.log_path || ''}
+                         placeholder={`Blank = <COMPANY_ROOT>/${companyId || '<id>'}/logs/ (or CSUITE_LOG_ROOT if set)`}
+                         onChange={e => set('log_path', e.target.value)} />
                 </Field>
               </div>
             </fieldset>

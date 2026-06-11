@@ -52,8 +52,6 @@ def prior_decision_check(state: dict) -> dict:
     Checks whether the current task is asking about something already decided.
     Uses SQLite keyword search and ChromaDB similarity.
     """
-    from core.config import DATA_ROOT
-
     task = state.get("current_task", "").strip()
     company_id = state.get("company_id", "")
     memories = state.get("relevant_memories", [])
@@ -142,9 +140,9 @@ def prior_decision_check(state: dict) -> dict:
 
 def _find_matching_decision(company_id: str, task: str) -> dict | None:
     """Search SQLite for a prior decision matching the current task."""
-    from core.config import DATA_ROOT
+    from core.config import database_path
 
-    db_path = DATA_ROOT / company_id / f"{company_id}.db"
+    db_path = database_path(company_id)
     if not db_path.exists():
         return None
 

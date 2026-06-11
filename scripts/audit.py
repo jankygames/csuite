@@ -18,12 +18,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import argparse
-from core.config import DATA_ROOT, COMPANY_ROOT
+from core.config import COMPANY_ROOT, database_path
 
 
 def audit_company(company_id: str) -> dict:
     """Generate a full audit report for a company."""
-    db_path = DATA_ROOT / company_id / f"{company_id}.db"
+    db_path = database_path(company_id)
     if not db_path.exists():
         return {"company_id": company_id, "error": "No database found"}
 

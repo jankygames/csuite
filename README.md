@@ -430,16 +430,12 @@ D:\csuite\
 ├── INSTALL.md                       ← step-by-step setup guide
 └── DESIGN.md                        ← design system reference
 
-D:\models\ollama\                   ← Ollama model cache (set via OLLAMA_MODELS env var)
-E:\venvs\csuite\                    ← Python virtual environment
+<OLLAMA_MODELS>\                    ← Ollama model cache (set via OLLAMA_MODELS env var)
+<venv>\                             ← Python virtual environment (your choice)
 
-G:\csuite_data\                     ← CSUITE_DATA_ROOT — SQLite databases (HDD)
-│   └── <company_id>\
-│       └── <company_id>.db
-│
-G:\csuite_data\companies\           ← CSUITE_COMPANY_ROOT — configs + knowledge + ChromaDB
-│   └── <company_id>\
-│       ├── config.json
+<CSUITE_COMPANY_ROOT>\              ← the one global path (default: ~/.csuite/companies/)
+│   └── <company_id>\               ← everything for one company lives under here by default
+│       ├── config.json             ← company DNA + per-company path overrides
 │       ├── prompts\                ← agent personality prompts (markdown)
 │       │   ├── ceo.md
 │       │   ├── cfo.md
@@ -450,12 +446,21 @@ G:\csuite_data\companies\           ← CSUITE_COMPANY_ROOT — configs + knowle
 │       ├── index_meta.json         ← indexer state tracking
 │       ├── knowledge_versions\     ← timestamped snapshots
 │       ├── chroma\                 ← ChromaDB fallback store
-│       └── documents\              ← CWA/CRA/CSA artifacts (write_artifact target;
-│                                     override per-company via documents_path in config.json)
-
-F:\csuite_logs\                     ← CSUITE_LOG_ROOT — Session logs (HDD)
-│   └── <company_id>\sessions\
+│       ├── documents\              ← CWA/CRA/CSA artifacts (override via documents_path)
+│       ├── <company_id>.db         ← SQLite database (override via database_path)
+│       └── logs\                   ← session logs (override via log_path)
 ```
+
+**Optional global overrides** — if `CSUITE_DATA_ROOT` is set in the
+environment, every company's database lands at
+`<CSUITE_DATA_ROOT>/<id>/<id>.db` instead of the collocated default.
+Same story for `CSUITE_LOG_ROOT`. Useful for SSD/HDD splits where you
+want heavy sequential writes on a different volume. A single-drive
+install doesn't need either.
+
+**Per-company overrides** — `database_path`, `log_path`, `documents_path`,
+and `codebase_path` are all editable in the Settings tab. Any one company
+can put its data wherever it likes; the others are unaffected.
 
 ---
 
@@ -515,16 +520,24 @@ pip install -r requirements.txt
 
 **6. Clone this repository to D:\csuite\**
 
-**7. Set data path environment variables**
+**7. (Optional) Set data path environment variables**
+
+The system defaults to keeping every company's state under
+`~/.csuite/companies/<id>/` — fine for a single-drive install. Skip this
+step unless you want to relocate company data globally.
+
 ```powershell
 # System Properties → Advanced → Environment Variables
-# These control where company data is stored (outside the repo)
 #
-# Variable: CSUITE_COMPANY_ROOT   Value: G:\csuite_data\companies
-# Variable: CSUITE_DATA_ROOT      Value: G:\csuite_data
-# Variable: CSUITE_LOG_ROOT       Value: F:\csuite_logs
+# Variable: CSUITE_COMPANY_ROOT   Value: <wherever you want companies to live>
 #
-# All three have sensible defaults — see core/config.py
+# Optional overrides for SSD/HDD splits:
+# Variable: CSUITE_DATA_ROOT      Value: <where SQLite DBs go; per-company subdirs>
+# Variable: CSUITE_LOG_ROOT       Value: <where session logs go; per-company subdirs>
+#
+# If you only want to relocate one company, leave these unset and use
+# database_path / log_path / documents_path in that company's config.json
+# (or via the Settings tab) instead. See core/config.py for resolution order.
 ```
 
 ---
@@ -536,12 +549,17 @@ cd D:\csuite
 python scripts/new_company.py --id acme_corp --name "Acme Corp" --industry "B2B SaaS"
 ```
 
-This creates:
-- `CSUITE_COMPANY_ROOT/acme_corp/config.json` — edit this to define the company
-- `CSUITE_COMPANY_ROOT/acme_corp/prompts/*.md` — agent personality prompts (edit these)
-- `CSUITE_COMPANY_ROOT/acme_corp/chroma/` — ChromaDB vector store (starts empty)
-- `CSUITE_DATA_ROOT/acme_corp/acme_corp.db` — SQLite database with schema initialized
-- `CSUITE_LOG_ROOT/acme_corp/sessions/` — log directory
+This creates (paths shown for a default single-drive install):
+- `<COMPANY_ROOT>/acme_corp/config.json` — edit this to define the company
+- `<COMPANY_ROOT>/acme_corp/prompts/*.md` — agent personality prompts (edit these)
+- `<COMPANY_ROOT>/acme_corp/chroma/` — ChromaDB vector store (starts empty)
+- `<COMPANY_ROOT>/acme_corp/acme_corp.db` — SQLite database with schema initialized
+- `<COMPANY_ROOT>/acme_corp/logs/` — log directory
+
+If you have `CSUITE_DATA_ROOT` or `CSUITE_LOG_ROOT` set, the DB and logs
+land under those instead. Edit `database_path` / `log_path` in
+`acme_corp/config.json` (or the Settings tab) to override for just this
+one company.
 
 **Then:**
 1. Edit `config.json` to set mission, priorities, constraints, and escalation rules
@@ -696,6 +714,8 @@ python -m core.graph.runner `
 | `index_version_days` | int | Save versioned knowledge snapshot every N days. Default: 7. |
 | `codebase_path` | string | Absolute path to the codebase this company manages. Required for CCA worker. |
 | `documents_path` | string | Absolute path where CWA/CRA/CSA write their artifacts. Defaults to `<COMPANY_ROOT>/<id>/documents/`. Auto-created on first write. |
+| `database_path` | string | Absolute path to this company's SQLite file. Defaults to `<COMPANY_ROOT>/<id>/<id>.db` (or `<CSUITE_DATA_ROOT>/<id>/<id>.db` if that env var is set). Parent dir auto-created. |
+| `log_path` | string | Absolute path to this company's session-log directory. Defaults to `<COMPANY_ROOT>/<id>/logs/` (or `<CSUITE_LOG_ROOT>/<id>/sessions/` if that env var is set). Auto-created. |
 | `chat_history_length` | int | Max messages kept in conversation history. Default: 20. |
 | `chat_message_cap` | int | Max chars per message included in context. Default: 10000. |
 | `cca_max_turns` | int | Max Claude Code SDK turns per CCA session. Default: 50. |

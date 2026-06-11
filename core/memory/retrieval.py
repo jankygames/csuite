@@ -26,7 +26,7 @@ EMBED_MODEL   = "nomic-embed-text"
 OLLAMA_BASE   = "http://localhost:11434"
 TOP_K_SEMANTIC = 5    # number of semantically similar decisions to retrieve
 RECENT_SESSIONS = 3   # number of recent sessions to surface for recency context
-from core.config import COMPANY_ROOT, DATA_ROOT
+from core.config import COMPANY_ROOT, database_path
 
 # ── Public interface ──────────────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ def _semantic_search(company_id: str, query: str, top_k: int) -> list[dict]:
 # ── Internal: SQLite recency queries ─────────────────────────────────────────
 
 def _db_path(company_id: str) -> Path:
-    return DATA_ROOT / company_id / f"{company_id}.db"
+    return database_path(company_id)
 
 
 def _recent_decisions(company_id: str, limit: int = 3) -> list[dict]:

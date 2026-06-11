@@ -31,7 +31,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from core.agents.base import build_llm, invoke_llm, DEFAULT_OLLAMA_MODEL
-from core.config import COMPANY_ROOT, DATA_ROOT
+from core.config import COMPANY_ROOT, database_path
 
 
 # ── Indexer prompt ───────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ def _load_company_config(company_id: str) -> dict:
 
 
 def _count_decisions(company_id: str) -> int:
-    db_path = DATA_ROOT / company_id / f"{company_id}.db"
+    db_path = database_path(company_id)
     if not db_path.exists():
         return 0
     with sqlite3.connect(str(db_path)) as conn:
@@ -224,7 +224,7 @@ def _build_full_history(company_id: str) -> str:
     Read the entire decision history from SQLite and format it as
     structured text for the indexer LLM.
     """
-    db_path = DATA_ROOT / company_id / f"{company_id}.db"
+    db_path = database_path(company_id)
     if not db_path.exists():
         return "No history available."
 

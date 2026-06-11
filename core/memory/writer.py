@@ -22,7 +22,7 @@ from pathlib import Path
 import chromadb
 from langchain_ollama import OllamaEmbeddings
 
-from core.config import COMPANY_ROOT, DATA_ROOT
+from core.config import COMPANY_ROOT, database_path as _resolve_db_path
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -50,9 +50,11 @@ def write_session_to_db(state: dict) -> None:
 # ── Internal: DB initialisation ───────────────────────────────────────────────
 
 def _db_path(company_id: str) -> Path:
-    path = DATA_ROOT / company_id
-    path.mkdir(parents=True, exist_ok=True)
-    return path / f"{company_id}.db"
+    # Thin wrapper over core.config.database_path so existing imports
+    # (`from core.memory.writer import _db_path`) keep working. The helper
+    # honors per-company `database_path` config and the legacy DATA_ROOT
+    # env var, falling back to <COMPANY_ROOT>/<id>/<id>.db.
+    return _resolve_db_path(company_id)
 
 
 def _ensure_db_exists(company_id: str) -> None:

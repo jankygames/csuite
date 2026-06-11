@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from chainlit.utils import mount_chainlit
 
-from core.config import COMPANY_ROOT, DATA_ROOT, DEFAULTS
+from core.config import COMPANY_ROOT, DEFAULTS, database_path
 
 ROOT = pathlib.Path(__file__).parent
 PUBLIC = ROOT / "public"
@@ -77,7 +77,7 @@ def _load_config(company_id: str) -> dict:
 
 
 def _db_path(company_id: str) -> pathlib.Path:
-    return DATA_ROOT / company_id / f"{company_id}.db"
+    return database_path(company_id)
 
 
 # ── Dashboard data ───────────────────────────────────────────────────────────
@@ -264,7 +264,7 @@ _EDITABLE_KEYS = {
     "mission", "strategic_priorities", "constraints",
     "risk_profile", "decision_style", "escalation_rules", "agent_personalities",
     # Paths the owner picks per company:
-    "codebase_path", "documents_path",
+    "codebase_path", "documents_path", "database_path", "log_path",
     # Inference backend per company (defaults live in core/agents/base.py):
     "model_provider", "model_name", "context_length",
 }
@@ -534,7 +534,7 @@ def _seed_sample_companies() -> None:
                             pf.read_text(encoding="utf-8"), encoding="utf-8"
                         )
             (dest / "chroma").mkdir(exist_ok=True)
-            _init_company_db(DATA_ROOT / src.name / f"{src.name}.db")
+            _init_company_db(database_path(src.name))
         except OSError:
             # Don't take down the server because a sample failed to seed —
             # the user can still use any companies that did get through.
