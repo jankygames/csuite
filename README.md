@@ -376,35 +376,41 @@ D:\csuite\
 │       └── *.jsx, *.css            ← In-browser React (Babel standalone)
 │
 ├── core\
-│   ├── config.py                   ← Centralised path config (env vars)
+│   ├── config.py                   ← Path resolution: env vars + per-company helpers
+│   │                                  (database_path, log_dir, documents_dir)
 │   ├── state.py                    ← LangGraph CompanyState TypedDict
 │   │
 │   ├── agents\
 │   │   ├── __init__.py             ← Agent registries (CSUITE_AGENTS, WORKER_AGENTS)
 │   │   ├── base.py                 ← C-suite base: LLM call, hybrid parser, retry
-│   │   ├── base_worker.py          ← Worker base: execute interface, keyword matching
+│   │   ├── base_worker.py          ← Worker base + write_artifact() to documents_path
 │   │   ├── ceo.py                  ← CEO: synthesis, presentation, escalation rules
 │   │   ├── cfo.py                  ← CFO: financial risk
 │   │   ├── coo.py                  ← COO: operational feasibility
 │   │   ├── cmo.py                  ← CMO: market and customer impact
 │   │   ├── cto.py                  ← CTO: technical risk
-│   │   ├── cca.py                  ← CCA: Claude Code Agent (worker, interactive)
-│   │   ├── cwa.py                  ← CWA: Content Writer Agent (worker)
-│   │   ├── cra.py                  ← CRA: Research Agent (worker)
-│   │   └── csa.py                  ← CSA: Communications Agent (worker)
+│   │   ├── cca.py                  ← CCA: Claude Code Agent (interactive, ProactorEventLoop)
+│   │   ├── cwa.py                  ← CWA: Content Writer Agent (persists to documents_path)
+│   │   ├── cra.py                  ← CRA: Research Agent (persists to documents_path)
+│   │   └── csa.py                  ← CSA: Communications Agent (persists to documents_path)
 │   │
 │   ├── graph\
 │   │   ├── __init__.py
 │   │   ├── session_graph.py        ← Builds and compiles the LangGraph graph
-│   │   ├── nodes.py                ← All node functions (task_intake, deliberation, etc.)
-│   │   ├── edges.py                ← conflict_router conditional edge
-│   │   └── runner.py               ← CLI entry point (legacy — use app.py instead)
+│   │   ├── nodes.py                ← Top-level node imports (re-exports below)
+│   │   ├── deliberation_nodes.py   ← task_intake, prior decision check, round1, cross-response, CEO synth
+│   │   ├── worker_nodes.py         ← spawn_workers + worker keyword matching
+│   │   ├── node_utils.py           ← Shared node helpers (logging, notify, hybrid parsing)
+│   │   ├── edges.py                ← conflict_router + human_decision_router conditional edges
+│   │   └── runner.py               ← CLI entry point (legacy — use server.py instead)
 │   │
 │   ├── memory\
 │   │   ├── __init__.py
 │   │   ├── indexer.py              ← Karpathy-style knowledge distiller (SQLite → knowledge.md)
 │   │   ├── retrieval.py            ← Distilled knowledge (primary) + ChromaDB (fallback)
-│   │   └── writer.py               ← SQLite + ChromaDB write + re-index trigger
+│   │   ├── writer.py               ← SQLite + ChromaDB write + re-index trigger
+│   │   ├── financials.py           ← Scaffolding for planned financial data integration
+│   │   └── ingest.py               ← Scaffolding for planned external-doc ingestion
 │   │
 │   └── tools\
 │       ├── __init__.py
@@ -419,9 +425,17 @@ D:\csuite\
 │       ├── cmo.md
 │       └── cto.md
 │
+├── companies\
+│   └── example_company\            ← Bundled sample, seeded into COMPANY_ROOT on first boot
+│
 ├── scripts\
 │   ├── new_company.py              ← Scaffold a new company instance
-│   └── run_indexer.py              ← Manual knowledge indexer CLI
+│   ├── run_indexer.py              ← Manual knowledge indexer CLI
+│   ├── audit.py                    ← Scaffolding: decision-history audit dump
+│   ├── financials.py               ← Scaffolding: financial data CLI (see core/memory/financials.py)
+│   ├── ingest.py                   ← Scaffolding: external-doc ingestion (see core/memory/ingest.py)
+│   ├── scheduled_session.py        ← Scaffolding: cron-style scheduled deliberation
+│   └── tune_prompts.py             ← Scaffolding: prompt tuning from override feedback
 │
 ├── requirements.txt
 ├── .chainlit\config.toml            ← Chainlit settings (loads custom.css/js)

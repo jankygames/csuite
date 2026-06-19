@@ -222,9 +222,8 @@ through five channels:
    task block (28×28px square, mono 10px, `--accent` background, white
    text reading "OWNER"). Same pattern: text as iconography.
 
-**No emoji** in agent-facing output. The auto-generated `chainlit.md`
-welcome file has some, but it is unused boilerplate. Keep agent-facing
-surfaces emoji-free.
+**No emoji** in agent-facing output. Keep every surface — chat, dashboard,
+terminal, and the docs the workers write — emoji-free.
 
 ---
 
